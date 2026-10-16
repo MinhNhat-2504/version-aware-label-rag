@@ -7,6 +7,11 @@ lock, prompt preparation, local model calls, retrieval summary, method-blind ans
 packet, answer-review reconciliation and end-to-end scoring. It never reads the
 sealed holdout. Its reader and answer judgments are synthetic plumbing inputs, so
 every score it produces is a software check, not an evaluation result.
+
+``--design llm_expert`` (the active design) uses one ``llm_`` annotator and one human
+expert: blind receipt, receipt-checked queue, spreadsheet resolution signed by the
+expert, the LLM answer-review converter and a no-op resume of a complete locked run.
+``--design two_reader`` rehearses the earlier two-human consensus path.
 """
 
 from __future__ import annotations
@@ -35,7 +40,9 @@ COPIED_FILES = ("results/learned_selector_model.json", "results/learned_selector
                 "paper/ANALYSIS_PLAN.md")
 OUTPUT = REPO / "results/holdout_pipeline_rehearsal.json"
 METHODS = ("bm25", "learned_cover", "ontology_cover")
-READERS = ("rehearsal-reader-a", "rehearsal-reader-b")
+READER_DESIGNS = {"two_reader": ("rehearsal-reader-a", "rehearsal-reader-b"),
+                  "llm_expert": ("llm_rehearsal_annotator", "rehearsal-expert")}
+READERS = READER_DESIGNS["two_reader"]
 PAXLOVID = "8a99d6d6-fd9e-45bb-b1bf-48c7f761232a"
 GASTROCROM = "00623958-a8fe-47d1-a0d2-0aa4e2f7966e"
 ATORVASTATIN = "01683314-5996-dbe4-e063-6394a90aa07a"
@@ -100,7 +107,7 @@ def locate_spans(xml_bytes: bytes, sections: dict[int, str],
     return located
 
 
-def build_inputs(root: Path) -> dict:
+def build_inputs(root: Path, readers_ids: tuple[str, str] = READERS) -> dict:
     """Write the isolated sources, candidates and two synthetic reader files."""
     pairs = {row["set_id"]: row for source in DEV_SOURCES for row in read_jsonl(source)}
     for relative, set_ids in COHORT_FILES.items():
@@ -111,7 +118,7 @@ def build_inputs(root: Path) -> dict:
     source_of = {set_id: relative for relative, set_ids in COHORT_FILES.items() for set_id in set_ids}
     xml_dir = root / "results/pinned_xml_holdout_after_gold"
     xml_dir.mkdir(parents=True, exist_ok=True)
-    candidates, readers = [], {reader: [] for reader in READERS}
+    candidates, readers = [], {reader: [] for reader in readers_ids}
     for set_id, slug, question, versions in ITEMS:
         for version in pairs[set_id]["versions"]:
             number = version["spl_version"]
@@ -130,7 +137,7 @@ def build_inputs(root: Path) -> dict:
             candidates.append(candidate)
             claims = versions[number]
             sections = {s["section_index"]: s["text"] for s in version["sections"]}
-            for position, reader in enumerate(READERS):
+            for position, reader in enumerate(readers_ids):
                 review = {**candidate, "reviewer_id": reader, "clinical_significance": "",
                           "notes": "Synthetic rehearsal reader; not a human judgment."}
                 if claims is None:
@@ -169,6 +176,33 @@ def build_inputs(root: Path) -> dict:
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+
+
+def write_llm_provenance(root: Path, reader_file: str, basis: str, basis_key: str, status: str,
+                         annotator: str) -> str:
+    """Synthetic provenance receipt for the rehearsal LLM file (no model wrote it)."""
+    path = f"{reader_file[:-len('.jsonl')]}.provenance.json"
+    receipt = {"status": status, "annotator_id": annotator, "model": "rehearsal fixture, no model call",
+               "disclosures": ["Synthetic rehearsal annotation on development labels."],
+               "annotation_sha256": sha256((root / reader_file).read_bytes()).hexdigest(),
+               basis_key: sha256((root / basis).read_bytes()).hexdigest()}
+    (root / path).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def fill_resolution_sheet(path: Path, output: Path) -> None:
+    """Rehearsal expert keeps their own review except one adopted LLM row."""
+    import csv
+    import io
+    rows = list(csv.DictReader(io.StringIO(path.read_bytes().decode("utf-8-sig"))))
+    for number, row in enumerate(rows):
+        row["choice"] = "llm" if number == 0 else "expert"
+        row["notes"] = "Synthetic rehearsal resolution; development data only."
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    output.write_bytes(buffer.getvalue().encode("utf-8-sig"))
 
 
 def sign_gold_queue(path: Path, output: Path) -> None:
@@ -241,22 +275,44 @@ class Runner:
         return result.stdout
 
 
-def rehearse(root: Path, model: str) -> dict:
-    inputs = build_inputs(root)
+def rehearse(root: Path, model: str, design: str = "llm_expert") -> dict:
+    from .answer_review import ANSWER_BLIND_STATUS, FIELDS, LLM_ANSWER_STATUS  # noqa: F401
+    from .check_holdout_reviews import LLM_PROVENANCE_STATUS
+    readers = READER_DESIGNS[design]
+    expert_design = design == "llm_expert"
+    inputs = build_inputs(root, readers)
     run = Runner(root)
+    xml = ("--xml-dir", "results/pinned_xml_holdout_after_gold")
     candidates, reader_a, reader_b = ("data/holdout/rehearsal_candidates.jsonl",
-                                      f"data/review/{READERS[0]}.jsonl", f"data/review/{READERS[1]}.jsonl")
+                                      f"data/review/{readers[0]}.jsonl", f"data/review/{readers[1]}.jsonl")
     queue, signed = "data/review/rehearsal_queue.json", "data/review/rehearsal_queue_signed.json"
+    receipts: tuple[str, ...] = ()
+    if expert_design:
+        provenance = write_llm_provenance(root, reader_a, candidates, "candidates_sha256",
+                                          LLM_PROVENANCE_STATUS, readers[0])
+        human_receipt = f"data/review/{readers[1]}.receipt.json"
+        run.run("expert_blind_receipt", "check_holdout_reviews", "--candidates", candidates,
+                "--reader-a", reader_b, "--receipt", human_receipt, *xml)
+        receipts = ("--human-receipt", human_receipt, "--llm-provenance", provenance)
+        run.run("refuse_llm_queue_without_receipts", "check_holdout_reviews", "--candidates", candidates,
+                "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml,
+                expect_failure=True)
     run.run("check_reader_files", "check_holdout_reviews", "--candidates", candidates,
-            "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue,
-            "--xml-dir", "results/pinned_xml_holdout_after_gold")
-    sign_gold_queue(root / queue, root / signed)
+            "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml, *receipts)
+    if expert_design:
+        run.run("expert_resolution_sheet", "expert_resolution", "sheet", "--queue", queue,
+                "--expert-id", readers[1], "--output-dir", "data/review/resolution")
+        fill_resolution_sheet(root / "data/review/resolution/resolution_sheet.csv",
+                              root / "data/review/resolution/filled.csv")
+        run.run("expert_resolution_sign", "expert_resolution", "sign", "--queue", queue,
+                "--expert-id", readers[1], "--sheet", "data/review/resolution/filled.csv", "--output", signed)
+    else:
+        sign_gold_queue(root / queue, root / signed)
     run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,
-            "--reader-b", reader_b, "--adjudicated-queue", signed,
-            "--xml-dir", "results/pinned_xml_holdout_after_gold")
+            "--reader-b", reader_b, "--adjudicated-queue", signed, *xml, *receipts)
     run.run("refuse_gold_overwrite", "compile_holdout_gold", "--candidates", candidates,
             "--reader-a", reader_a, "--reader-b", reader_b, "--adjudicated-queue", signed,
-            "--xml-dir", "results/pinned_xml_holdout_after_gold", expect_failure=True)
+            *xml, *receipts, expect_failure=True)
     run.run("refuse_prompts_before_lock", "prepare_holdout_eval", "--method", "bm25",
             "--output", "results/holdout_bm25_prompts.jsonl", expect_failure=True)
     run.run("execution_lock", "lock_holdout_execution", "--model", model)
@@ -272,6 +328,13 @@ def rehearse(root: Path, model: str) -> dict:
     run.run("refuse_repeat_call", "run_local", "--input", "results/holdout_bm25_prompts.jsonl",
             "--output", "results/holdout_bm25_responses.jsonl", "--model", model, "--seed", "20261016",
             expect_failure=True)
+    before = (root / "results/holdout_bm25_responses.jsonl").read_bytes()
+    resumed = run.run("resume_complete_run_makes_no_call", "run_local", "--input",
+                      "results/holdout_bm25_prompts.jsonl", "--output", "results/holdout_bm25_responses.jsonl",
+                      "--model", model, "--seed", "20261016", "--resume")
+    if (root / "results/holdout_bm25_responses.jsonl").read_bytes() != before or \
+            json.loads(resumed.strip().splitlines()[-1])["completed"] != 0:
+        raise RuntimeError("Resuming a complete locked run changed its responses")
     run.run("retrieval_summary", "summarize_holdout_retrieval",
             *[arg for method in METHODS for arg in (f"--{method.replace('_', '-')}",
                                                     f"results/holdout_{method}_prompts.jsonl")],
@@ -280,24 +343,59 @@ def rehearse(root: Path, model: str) -> dict:
     run.run("blinded_answer_packet", "prepare_blinded_answer_review", "--output", packet, "--private-map", key)
     gold = {row["qid"]: row["answerable"] for row in read_jsonl(root / "data/holdout/version_gold_adjudicated.jsonl")}
     rows = list(read_jsonl(root / packet))
-    for reader in READERS:
-        write_jsonl(root / f"review/{reader}_answers.jsonl",
-                    [synthetic_answer_review(row, reader, gold) for row in rows])
-    answer_args = ("--packet", packet, "--reader-a", f"review/{READERS[0]}_answers.jsonl",
-                   "--reader-b", f"review/{READERS[1]}_answers.jsonl")
+    answer_files = [f"review/{reader}_answers.jsonl" for reader in readers]
+    answer_receipts: tuple[str, ...] = ()
+    if expert_design:
+        spec = {"annotator_id": readers[0], "model": "rehearsal fixture, no model call",
+                "disclosures": ["Synthetic rehearsal answer review on development labels."],
+                "items": {row["review_id"]: {field: review[field] for field in FIELDS}
+                          for row in rows for review in [synthetic_answer_review(row, readers[0], gold)]}}
+        (root / "review/llm_answer_spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        run.run("llm_answer_review_converter", "build_llm_answer_review", "--spec", "review/llm_answer_spec.json",
+                "--packet", packet, "--output", answer_files[0])
+        write_jsonl(root / answer_files[1], [synthetic_answer_review(row, readers[1], gold) for row in rows])
+        answer_receipt = f"review/{readers[1]}_answers.receipt.json"
+        run.run("expert_answer_receipt", "answer_review", "receipt", "--packet", packet,
+                "--reader", answer_files[1], "--output", answer_receipt)
+        answer_receipts = ("--human-receipt", answer_receipt, "--llm-provenance",
+                           f"{answer_files[0][:-len('.jsonl')]}.provenance.json")
+    else:
+        for reader, path in zip(readers, answer_files):
+            write_jsonl(root / path, [synthetic_answer_review(row, reader, gold) for row in rows])
+    answer_args = ("--packet", packet, "--reader-a", answer_files[0], "--reader-b", answer_files[1])
     run.run("check_answer_reviews", "answer_review", "check", *answer_args,
-            "--output", "review/answer_queue.json")
-    sign_answer_queue(root / "review/answer_queue.json", root / "review/answer_queue_signed.json")
+            "--output", "review/answer_queue.json", *answer_receipts)
+    if expert_design:
+        run.run("expert_answer_resolution_sheet", "expert_resolution", "sheet", "--queue",
+                "review/answer_queue.json", "--expert-id", readers[1], "--output-dir", "review/resolution")
+        fill_resolution_sheet(root / "review/resolution/resolution_sheet.csv", root / "review/resolution/filled.csv")
+        run.run("expert_answer_resolution_sign", "expert_resolution", "sign", "--queue", "review/answer_queue.json",
+                "--expert-id", readers[1], "--sheet", "review/resolution/filled.csv",
+                "--output", "review/answer_queue_signed.json")
+    else:
+        sign_answer_queue(root / "review/answer_queue.json", root / "review/answer_queue_signed.json")
     run.run("compile_answer_reviews", "answer_review", "compile", *answer_args,
-            "--adjudicated-queue", "review/answer_queue_signed.json", "--output", "review/final_answer_reviews.jsonl")
+            "--adjudicated-queue", "review/answer_queue_signed.json", "--output", "review/final_answer_reviews.jsonl",
+            *answer_receipts)
     run.run("end_to_end_summary", "summarize_answer_reviews", "--packet", packet, "--private-map", key,
             "--final-reviews", "review/final_answer_reviews.jsonl", "--output", "results/holdout_answer_scores.json")
 
     retrieval = json.loads((root / "results/holdout_retrieval_summary.json").read_text(encoding="utf-8"))
     answers = json.loads((root / "results/holdout_answer_scores.json").read_text(encoding="utf-8"))
     responses = {method: list(read_jsonl(root / f"results/holdout_{method}_responses.jsonl")) for method in METHODS}
+    calls = [row for method_rows in responses.values() for row in method_rows if not row.get("error")]
+    seconds = [row["total_duration_ns"] / 1e9 for row in calls if row.get("total_duration_ns")]
+    prompt_tokens = [row["prompt_eval_count"] for row in calls if isinstance(row.get("prompt_eval_count"), int)]
     return {
+        "design": design, "reader_ids": list(readers),
+        "gold_review_design": retrieval.get("gold_review_design"),
+        "answer_review_design": answers.get("answer_review_design"),
         "inputs": inputs, "stages": run.stages,
+        "model_timing": {"calls": len(calls),
+                         "mean_seconds_per_call": round(sum(seconds) / len(seconds), 2) if seconds else None,
+                         "max_seconds_per_call": round(max(seconds), 2) if seconds else None,
+                         "max_prompt_tokens": max(prompt_tokens) if prompt_tokens else None,
+                         "context_window_tight_calls": sum(bool(row.get("context_window_tight")) for row in calls)},
         "sample_flow": retrieval["sample_flow"],
         "retrieval_success_counts": {method: sum(item[method] for item in retrieval["per_item"])
                                      for method in METHODS},
@@ -315,6 +413,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO / "results/holdout_rehearsal")
     parser.add_argument("--model", default="qwen2.5:3b")
+    parser.add_argument("--design", choices=tuple(READER_DESIGNS), default="llm_expert")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
     root = args.root.resolve()
@@ -323,7 +422,7 @@ def main() -> None:
     root.mkdir(parents=True)
     started = datetime.now(timezone.utc).isoformat()
     try:
-        outcome = rehearse(root, args.model)
+        outcome = rehearse(root, args.model, args.design)
         status = "pass"
     except Exception as error:  # Record the failing stage before re-raising.
         outcome = {"error": str(error)[-2000:]}
