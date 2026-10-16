@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from time import perf_counter
 
-from .data import load_labels, load_questions, split_label
+from .data import load_labels, load_questions, portable_path, split_label
 from .dense_baseline import MODEL, embed_missing, rank_dense, rank_rrf
 from .prompts import make_prompt
 from .retrieval import LabelIndex
@@ -27,8 +27,9 @@ def main() -> None:
         raise ValueError("Frozen development sample is missing")
     labels_path = SOURCE / "labels/labels.jsonl"
     qa_path = SOURCE / "qa/qa.jsonl"
+    recorded = {portable_path(name).as_posix(): digest for name, digest in sample["source_sha256"].items()}
     for path in (labels_path, qa_path):
-        if sha256(path.read_bytes()).hexdigest() != sample["source_sha256"][str(path)]:
+        if sha256(path.read_bytes()).hexdigest() != recorded[path.as_posix()]:
             raise ValueError(f"Development source changed: {path}")
     questions = {q.qid: q for q in load_questions(qa_path) if split_label(q.set_id) == "dev"}
     labels = load_labels(labels_path)

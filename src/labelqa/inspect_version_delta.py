@@ -9,6 +9,21 @@ from pathlib import Path
 from .data import read_jsonl
 
 
+def occurrence_keys(sections: list[dict]) -> list[tuple[str, str, int]]:
+    """Key sections by code, title and occurrence, so repeated titles never overwrite.
+
+    Labels repeat subsection titles such as "Risk Summary" under 8.1 Pregnancy and 8.2
+    Lactation; a plain (code, title) key would compare the wrong subsections.
+    """
+    seen: dict[tuple[str, str], int] = {}
+    keys = []
+    for section in sections:
+        base = (section["code"], section["title"])
+        keys.append((*base, seen.get(base, 0)))
+        seen[base] = seen.get(base, 0) + 1
+    return keys
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sources", type=Path)
@@ -17,12 +32,13 @@ def main() -> None:
     args = parser.parse_args()
     for row in read_jsonl(args.sources):
         old, new = row["versions"]
-        old_sections = {(s["code"], s["title"]): s["text"] for s in old["sections"]}
+        old_sections = {key: s["text"] for key, s in zip(occurrence_keys(old["sections"]), old["sections"])}
+        new_keys = dict(zip((s["section_index"] for s in new["sections"]), occurrence_keys(new["sections"])))
         print(f"\n{row['set_id']} {row['title']} v{old['spl_version']}→v{new['spl_version']}")
         changed = row.get("clinical_change_sections") or []
         for item in changed[:args.max_sections]:
             section = next(s for s in new["sections"] if s["section_index"] == item["section_index"])
-            before = old_sections.get((section["code"], section["title"]), "").split()
+            before = old_sections.get(new_keys[section["section_index"]], "").split()
             after = section["text"].split()
             edits = []
             for tag, i, j, k, l in SequenceMatcher(None, before, after, autojunk=False).get_opcodes():

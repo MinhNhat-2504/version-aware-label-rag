@@ -74,16 +74,17 @@ def main() -> None:
         user = f"Source passage:\n{source}\n\nClaim:\n{claim}"
         calls = []
         for repeat in range(args.repeats):
-            response = post_json("/api/chat", {"model": MODEL,
-                                                "messages": [{"role": "system", "content": SYSTEM},
-                                                             {"role": "user", "content": user}],
-                                                "stream": False, "format": "json", "options": options}, 180)
-            raw = response.get("message", {}).get("content", "")
+            raw = ""
             try:
+                response = post_json("/api/chat", {"model": MODEL,
+                                                    "messages": [{"role": "system", "content": SYSTEM},
+                                                                 {"role": "user", "content": user}],
+                                                    "stream": False, "format": "json", "options": options}, 180)
+                raw = response.get("message", {}).get("content", "")
                 result = parse_verdict(raw, source)
                 calls.append({"parsed": result, "matches_synthetic_expected": result["verdict"] == expected,
                               "raw": raw})
-            except (ValueError, json.JSONDecodeError) as exc:
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
                 calls.append({"error": str(exc), "raw": raw, "matches_synthetic_expected": False})
         items.append({"case_id": case_id, "source": source, "claim": claim,
                       "synthetic_expected": expected, "prompt_sha256": sha256((SYSTEM + user).encode()).hexdigest(),

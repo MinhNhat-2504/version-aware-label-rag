@@ -57,7 +57,9 @@ def main() -> None:
                     metrics = score_one(prompt, row)
                     row["valid_schema"] = metrics.get("valid_schema")
                     row["correct_refusal_decision"] = metrics.get("correct_refusal_decision")
-                    summary[(prompt["qid"], "abstain", row["parsed_response"].get("abstain"))] += 1
+                    parsed = row["parsed_response"]
+                    summary[(prompt["qid"], "abstain",
+                             parsed.get("abstain") if isinstance(parsed, dict) else None)] += 1
                 except (OSError, ValueError, json.JSONDecodeError) as exc:
                     row["error"] = str(exc)
                     summary[(prompt["qid"], "error")] += 1

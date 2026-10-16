@@ -7,6 +7,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from .data import portable_path
 from .summarize_holdout_retrieval import paired_summary
 
 
@@ -30,11 +31,13 @@ def build() -> dict:
     source = json.loads(SOURCE.read_text(encoding="utf-8"))
     if source.get("status") != "four_method_two_call_development_diagnostic_not_clinical_answer_accuracy":
         raise ValueError("Unexpected development report")
-    for name, digest in source["inputs_sha256"].items():
+    # Keys were written on Windows; compare them as POSIX paths on every platform.
+    inputs = {portable_path(name).as_posix(): digest for name, digest in source["inputs_sha256"].items()}
+    for name, digest in inputs.items():
         if sha256(Path(name).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Frozen report input changed: {name}")
-    prompts = {method: read_prompts(method, source["inputs_sha256"][
-        str(Path(f"results/paired_dev_qa_{method}_prompts.jsonl"))]) for method in METHODS}
+    prompts = {method: read_prompts(method, inputs[f"results/paired_dev_qa_{method}_prompts.jsonl"])
+               for method in METHODS}
     rows = [row for row in source["items"] if row["cohort"] == COHORT]
     if len(rows) != 24 or len({row["qid"] for row in rows}) != len(rows):
         raise ValueError("Representative sample differs from the frozen 24 items")
