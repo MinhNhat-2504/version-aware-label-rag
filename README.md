@@ -41,6 +41,9 @@ python -m unittest discover -s tests -v
 python -m labelqa.repository_preflight --scope source
 ```
 
+The source preflight inspects the Git index and fails if it finds research data,
+results, manuscripts, reviewer payloads, PDF files or DOCX files in the tracked tree.
+
 Linux or macOS:
 
 ```bash

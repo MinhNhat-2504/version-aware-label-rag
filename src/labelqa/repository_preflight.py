@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
 
 from .export_reviewer_interface import ROOT, build_payload, bundle_text
 
@@ -26,6 +27,46 @@ FULL_ARTIFACT_FILES = (
     Path("paper/RESULTS_MANIFEST.json"),
     Path("reviewer_ui/dist/review-data.js"),
 )
+SOURCE_FORBIDDEN_PREFIXES = ("data/", "paper/", "results/", "private_review/")
+SOURCE_FORBIDDEN_PATHS = {"reviewer_ui/dist/review-data.js"}
+SOURCE_FORBIDDEN_SUFFIXES = (".pdf", ".docx")
+
+
+def prohibited_source_paths(paths: list[str]) -> list[str]:
+    """Return tracked paths that violate the source-only repository boundary."""
+    prohibited = []
+    for raw_path in paths:
+        path = raw_path.replace("\\", "/").lstrip("./")
+        folded = path.casefold()
+        if (folded.startswith(SOURCE_FORBIDDEN_PREFIXES)
+                or folded in SOURCE_FORBIDDEN_PATHS
+                or folded.endswith(SOURCE_FORBIDDEN_SUFFIXES)):
+            prohibited.append(path)
+    return sorted(set(prohibited))
+
+
+def source_tree_paths(root: Path) -> tuple[list[str], str]:
+    """Read the Git index when available, otherwise inspect an unpacked source tree."""
+    try:
+        top_level = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            check=False,
+            capture_output=True,
+        )
+    except OSError:
+        top_level = None
+        result = None
+    if (top_level is not None and top_level.returncode == 0
+            and Path(top_level.stdout.strip()).resolve() == root
+            and result is not None and result.returncode == 0):
+        return [part.decode("utf-8") for part in result.stdout.split(b"\0") if part], "git_index"
+    return [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()], "filesystem"
 
 
 def check(scope: str, root: Path = ROOT) -> dict:
@@ -40,6 +81,15 @@ def check(scope: str, root: Path = ROOT) -> dict:
     checks["required_repository_files_present"] = not missing
     if missing:
         blockers.append("missing required files: " + ", ".join(missing))
+
+    source_tree_inspection = None
+    if scope == "source":
+        tree_paths, inspection = source_tree_paths(root)
+        source_tree_inspection = inspection
+        prohibited = prohibited_source_paths(tree_paths)
+        checks["source_tree_excludes_private_artifacts"] = not prohibited
+        if prohibited:
+            blockers.append("source-only tree contains prohibited artifacts: " + ", ".join(prohibited))
 
     if scope != "source" and not missing:
         payload = build_payload(root)
@@ -57,11 +107,12 @@ def check(scope: str, root: Path = ROOT) -> dict:
         if not checks["reviewer_bundle_has_12_pairs_24_items"]:
             blockers.append("reviewer bundle item counts changed")
 
-    manifest_path = root / "paper/RESULTS_MANIFEST.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
-    checks["working_manifest_declares_pending_human_review"] = "pending" in str(
-        manifest.get("human_review", "")
-    ).casefold() if manifest else False
+    if scope != "source":
+        manifest_path = root / "paper/RESULTS_MANIFEST.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
+        checks["working_manifest_declares_pending_human_review"] = "pending" in str(
+            manifest.get("human_review", "")
+        ).casefold() if manifest else False
 
     if scope == "public":
         public_requirements = {
@@ -82,7 +133,7 @@ def check(scope: str, root: Path = ROOT) -> dict:
             for name, passed in public_requirements.items() if not passed
         )
 
-    return {
+    report = {
         "status": "pass" if not blockers else "blocked",
         "scope": scope,
         "checks": checks,
@@ -98,6 +149,9 @@ def check(scope: str, root: Path = ROOT) -> dict:
             else "Repository preflight passed."
         ),
     }
+    if source_tree_inspection is not None:
+        report["source_tree_inspection"] = source_tree_inspection
+    return report
 
 
 def main() -> None:

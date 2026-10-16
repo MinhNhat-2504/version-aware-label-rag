@@ -35,6 +35,11 @@ python -m labelqa.repository_preflight --scope public
 
 It remains blocked until manually adjudicated gold and its receipt, the frozen holdout execution lock, final holdout answer scores, and a results manifest without pending human review all exist.
 
+The source preflight reads `git ls-files` when Git metadata is available. It fails if
+the tracked tree contains `data/`, `paper/`, `results/`, `private_review/`, generated
+`review-data.js`, or any PDF/DOCX file. This catches force-added private artifacts even
+when `.gitignore` is configured correctly.
+
 ## Suggested GitHub settings
 
 - Visibility: Private.
