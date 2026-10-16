@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -72,6 +75,48 @@ def source_tree_paths(root: Path) -> tuple[list[str], str]:
     return [path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()], "filesystem"
 
 
+@contextmanager
+def working_directory(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def holdout_gates(root: Path) -> tuple[dict[str, bool], list[str]]:
+    """Verify, not just find, the gold, lock and holdout reports behind a public release."""
+    checks = {"manual_gold_and_receipt_valid": False, "holdout_execution_lock_valid": False,
+              "holdout_retrieval_summary_matches_gold_and_lock": False,
+              "holdout_answer_scores_match_gold_and_lock": False}
+    reasons: list[str] = []
+    with working_directory(root):
+        from .lock_holdout_execution import DEFAULT_LOCK, verify_lock
+        from .prepare_holdout_eval import DEFAULT_GOLD, load_manual_gold
+        try:
+            gold, receipt = load_manual_gold(DEFAULT_GOLD)
+            checks["manual_gold_and_receipt_valid"] = True
+            _, lock_hash = verify_lock(DEFAULT_LOCK, gold, DEFAULT_GOLD, receipt)
+            checks["holdout_execution_lock_valid"] = True
+        except (OSError, ValueError, KeyError) as error:
+            reasons.append(f"holdout gold/lock check failed: {error}")
+            return checks, reasons
+        for name, path, status in (
+                ("holdout_retrieval_summary_matches_gold_and_lock", "results/holdout_retrieval_summary.json",
+                 "after_manual_gold_retrieval_only_no_answer_support_claim"),
+                ("holdout_answer_scores_match_gold_and_lock", "results/holdout_answer_scores.json",
+                 "manual_adjudicated_end_to_end_answer_score_after_gold")):
+            report_path = Path(path)
+            report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
+            checks[name] = (report.get("status") == status
+                            and report.get("gold_sha256") == receipt["gold_sha256"]
+                            and report.get("execution_lock_sha256") == lock_hash)
+            if not checks[name]:
+                reasons.append(f"{path} is missing or does not match the gold and execution lock")
+    return checks, reasons
+
+
 def check(scope: str, root: Path = ROOT) -> dict:
     if scope not in {"source", "private", "public"}:
         raise ValueError("scope must be source, private or public")
@@ -121,23 +166,16 @@ def check(scope: str, root: Path = ROOT) -> dict:
         ).casefold() if manifest else False
 
     if scope == "public":
-        public_requirements = {
-            "manual_gold_and_receipt_present": (
-                root / "data/holdout/version_gold_adjudicated.jsonl"
-            ).is_file() and (
-                root / "data/holdout/version_gold_adjudicated.manifest.json"
-            ).is_file(),
-            "holdout_execution_lock_present": (root / "paper/HOLDOUT_EXECUTION_LOCK.json").is_file(),
-            "holdout_answer_scores_present": (root / "results/holdout_answer_scores.json").is_file(),
-            "manifest_no_longer_marks_human_review_pending": not checks[
-                "working_manifest_declares_pending_human_review"
-            ],
-        }
+        public_requirements, reasons = holdout_gates(root)
+        public_requirements["manifest_no_longer_marks_human_review_pending"] = not checks[
+            "working_manifest_declares_pending_human_review"
+        ]
         checks.update(public_requirements)
         blockers.extend(
             f"public release gate not satisfied: {name}"
             for name, passed in public_requirements.items() if not passed
         )
+        blockers.extend(reasons)
 
     report = {
         "status": "pass" if not blockers else "blocked",

@@ -1,4 +1,9 @@
-"""Record hashes of paper-facing results without copying large local artifacts."""
+"""Record hashes of paper-facing results without copying large local artifacts.
+
+The ``human_review`` field is derived from the holdout receipts rather than typed by
+hand: it stays "pending" until compiled manual gold exists and an end-to-end answer
+score was computed from that same gold and execution lock.
+"""
 
 from __future__ import annotations
 
@@ -51,6 +56,7 @@ REPORTS = (
     "results/synthetic_claim_judge_pilot.json",
     "results/holdout_source_preflight.json",
     "results/holdout_source_preflight_expanded.json",
+    "results/holdout_pipeline_rehearsal_v3.json",
     "results/equivalence_adjudicated_pilot_coverage.json",
 )
 SOURCES = (
@@ -70,6 +76,55 @@ SOURCES = (
 )
 
 
+HOLDOUT_GOLD = "data/holdout/version_gold_adjudicated.jsonl"
+HOLDOUT_GOLD_MANIFEST = "data/holdout/version_gold_adjudicated.manifest.json"
+HOLDOUT_LOCK = "paper/HOLDOUT_EXECUTION_LOCK.json"
+HOLDOUT_RETRIEVAL = "results/holdout_retrieval_summary.json"
+HOLDOUT_SCORES = "results/holdout_answer_scores.json"
+HOLDOUT_ARTIFACTS = (HOLDOUT_GOLD, HOLDOUT_GOLD_MANIFEST, HOLDOUT_LOCK, HOLDOUT_RETRIEVAL, HOLDOUT_SCORES)
+PENDING = "pending; no adjudicated gold or external holdout model scores"
+
+
+def read_json(path: str) -> dict | None:
+    file = Path(path)
+    return json.loads(file.read_text(encoding="utf-8")) if file.is_file() else None
+
+
+def signers(design: dict | None) -> str:
+    design = design or {}
+    llm = design.get("llm_annotator_ids") or []
+    text = f"{design.get('resolution_mode')} signed by {', '.join(design.get('resolver_ids') or [])}"
+    return text + (f"; disclosed LLM annotator {', '.join(llm)}" if llm else "")
+
+
+def human_review_status() -> str:
+    """Derive the review state from receipts; 'pending' until scores match gold and lock."""
+    gold = read_json(HOLDOUT_GOLD_MANIFEST)
+    if gold is None or not Path(HOLDOUT_GOLD).is_file():
+        return PENDING
+    from .review_resolution import review_design
+    gold_text = f"gold compiled ({signers(review_design(gold))})"
+    scores, lock = read_json(HOLDOUT_SCORES), Path(HOLDOUT_LOCK)
+    if scores is None or not lock.is_file():
+        return f"{gold_text}; holdout execution or answer review pending"
+    if (scores.get("status") != "manual_adjudicated_end_to_end_answer_score_after_gold"
+            or scores.get("gold_sha256") != gold.get("gold_sha256")
+            or scores.get("execution_lock_sha256") != sha256(lock.read_bytes()).hexdigest()):
+        return f"{gold_text}; answer scores do not match gold and lock, review pending"
+    return f"complete: {gold_text}; answer reviews {signers(scores.get('answer_review_design'))}"
+
+
+def benchmark_lock_code() -> dict:
+    """Show whether code hashed by the one-shot benchmark lock has changed since the test."""
+    lock = read_json("paper/BENCHMARK_TEST_LOCK.json") or {}
+    changed = sorted(name for name, digest in (lock.get("code_sha256") or {}).items()
+                     if sha256((Path("src/labelqa") / name).read_bytes()).hexdigest() != digest)
+    return {"lock_created_utc": lock.get("created_utc"), "files_changed_since_lock": changed,
+            "note": ("The test ran once under the locked hashes; later edits do not change its saved "
+                     "report but mean HEAD no longer reproduces the lock check.") if changed else
+                    "Locked code matches the working tree."}
+
+
 def describe(path: str) -> dict:
     file = Path(path)
     if not file.is_file():
@@ -82,8 +137,10 @@ def main() -> None:
         "status": "working_paper_local_artifact_hashes_not_final_release",
         "artifacts": {path: describe(path) for path in REPORTS},
         "sources": {path: describe(path) for path in SOURCES},
-        "human_review": "pending; no adjudicated gold or external holdout model scores",
+        "holdout_artifacts": {path: describe(path) for path in HOLDOUT_ARTIFACTS if Path(path).is_file()},
+        "human_review": human_review_status(),
         "benchmark_test": "retrieval proxy evaluated once after paper/BENCHMARK_TEST_LOCK.json; no answer generation",
+        "benchmark_test_lock_code": benchmark_lock_code(),
         "note": "The results directory and upstream snapshot are local/ignored; retain files with these hashes for reproduction.",
     }
     output = Path("paper/RESULTS_MANIFEST.json")
