@@ -61,6 +61,7 @@ def paired_cluster_bootstrap(
     candidate: list[tuple[Question, list[int]]],
     task: str = "multihop",
     draws: int = 2000,
+    seed: int = 20261015,
 ) -> dict:
     """95% CI for all-gold@5 difference, resampling labels, not questions."""
     if len(baseline) != len(candidate):
@@ -80,7 +81,7 @@ def paired_cluster_bootstrap(
         return {"task": task, "n_labels": 0, "n_questions": 0}
     observations = [pair for label in labels for pair in by_label[label]]
     delta = sum(new - base for base, new in observations) / len(observations)
-    generator = random.Random(20261015)
+    generator = random.Random(seed)
     samples = []
     for _ in range(draws):
         chosen = generator.choices(labels, k=len(labels))
@@ -99,5 +100,5 @@ def paired_cluster_bootstrap(
             round(samples[min(int(0.975 * draws), draws - 1)], 4),
         ],
         "draws": draws,
-        "seed": 20261015,
+        "seed": seed,
     }
