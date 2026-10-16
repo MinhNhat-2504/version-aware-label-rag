@@ -10,6 +10,7 @@ import uuid
 
 from labelqa.check_holdout_reviews import blind_receipt, check
 from labelqa.compile_holdout_gold import compile_gold
+from labelqa.expert_resolution import comparison_html, read_sheet, sheet_rows, sign, write_sheet
 from labelqa.export_reviewer_interface import ROOT
 from labelqa.recent import parse_sections
 from labelqa.review_agreement import cohen_kappa
@@ -124,6 +125,57 @@ class LlmExpertSourceReviewTests(unittest.TestCase):
             span(1, "table_row", "Schedule Adults", 0, 1)]
         with self.assertRaisesRegex(ValueError, "not inside one parsed"):
             compile_gold(queue, crossing, {"q-v2": self.candidate}, {"q-v2": self.sections}, passages)
+
+    def test_resolution_sheet_signs_a_compilable_queue(self):
+        queue = self.queue()
+        out = self.root / "resolution"
+        out.mkdir()
+        rows = sheet_rows(queue, EXPERT)
+        self.assertEqual((rows[0]["choice"], rows[0]["notes"]), ("", ""))
+        write_sheet(rows, out / "sheet.csv")
+        self.assertIn("Chuyên gia", comparison_html(queue, EXPERT))
+        # Excel in a Vietnamese locale may save semicolon-separated UTF-8 CSV.
+        filled = (out / "sheet.csv").read_bytes().decode("utf-8-sig").replace(",,\r\n", ",llm,Lấy bản LLM.\r\n")
+        (out / "filled.csv").write_bytes(filled.replace(",", ";").encode("utf-8-sig"))
+        signed = sign(queue, read_sheet(out / "filled.csv"), EXPERT)
+        row = signed["queue"][0]
+        self.assertEqual((row["resolution_choice"], row["expert_resolver_id"]), ("llm", EXPERT))
+        self.assertEqual(row["final_answer"], PROSE)
+        self.assertEqual(queue["queue"][0]["final_answer"], "")  # The source queue is not mutated.
+        passages = {"q-v2": parse_structured_passages(SYNTHETIC_XML)}
+        gold, _ = compile_gold(queue, signed, {"q-v2": self.candidate}, {"q-v2": self.sections}, passages)
+        self.assertEqual(gold[0]["adjudication_notes"], "Lấy bản LLM.")
+
+    def test_sheet_requires_choice_notes_and_a_human_signer(self):
+        queue = self.queue()
+        with self.assertRaisesRegex(ValueError, "Write a resolution note"):
+            sign(queue, {"q-v2": {"choice": "expert", "notes": " "}}, EXPERT)
+        with self.assertRaisesRegex(ValueError, "Choose one of"):
+            sign(queue, {"q-v2": {"choice": "", "notes": "x"}}, EXPERT)
+        with self.assertRaisesRegex(ValueError, "not an LLM ID"):
+            sheet_rows(queue, LLM)
+        with self.assertRaisesRegex(ValueError, "revised file"):
+            sign(queue, {"q-v2": {"choice": "revised", "notes": "x"}}, EXPERT)
+        rewrite = deepcopy(queue)
+        rewrite["queue"][0]["reader_a"]["item_decision"] = "rewrite"
+        with self.assertRaisesRegex(ValueError, "rewrite"):
+            sign(rewrite, {"q-v2": {"choice": "llm", "notes": "x"}}, EXPERT)
+        signed = sign(rewrite, {"q-v2": {"choice": "reject", "notes": "Ambiguous question."}}, EXPERT)
+        self.assertEqual(signed["queue"][0]["final_decision"], "reject")
+
+    def test_answer_queue_sign_copies_every_review_field(self):
+        review = {"review_id": "r" * 16, "qid": "q", "question": "Q?", "review_status": "assessed",
+                  "answer_complete": True, "all_claims_supported": True,
+                  "citations_at_correct_location": True, "correct_version": True,
+                  "refusal_appropriate": None, "unsafe_unsupported_claim": False,
+                  "claim_judgments": [], "review_notes": "Fine."}
+        queue = {"reader_ids": [EXPERT, LLM], "queue": [
+            {"review_id": "r" * 16, "qid": "q", "reasons": [], "reader_a": {**review, "reviewer_id": EXPERT},
+             "reader_b": {**review, "reviewer_id": LLM, "answer_complete": False}}]}
+        signed = sign(queue, {"r" * 16: {"choice": "expert", "notes": "Mine."}}, EXPERT)
+        self.assertTrue(signed["queue"][0]["final_answer_complete"])
+        with self.assertRaisesRegex(ValueError, "Choose one of"):
+            sign(queue, {"r" * 16: {"choice": "reject", "notes": "x"}}, EXPERT)
 
     def test_cohen_kappa(self):
         self.assertEqual(cohen_kappa([("a", "a"), ("b", "b")]), 1.0)
