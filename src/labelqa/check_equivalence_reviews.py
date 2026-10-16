@@ -87,7 +87,8 @@ def check(blank: dict[str, dict], a: dict[str, dict], b: dict[str, dict]) -> dic
                       "reader_b": {k: right[k] for k in ANNOTATIONS},
                       "decision_disagreement": left["decision"] != right["decision"],
                       "resolution_mode": "", "consensus_reviewer_ids": [],
-                      "adjudicator_id": "", "final_decision": "", "adjudication_notes": ""})
+                      "expert_resolver_id": "", "adjudicator_id": "",
+                      "final_decision": "", "adjudication_notes": ""})
     pairs = {f"{x}/{y}": sum(row["reader_a"]["decision"] == x and
                              row["reader_b"]["decision"] == y for row in queue)
              for x in sorted(DECISIONS) for y in sorted(DECISIONS)}

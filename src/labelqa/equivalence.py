@@ -13,7 +13,7 @@ import unicodedata
 from .data import load_labels, load_questions, portable_path, split_label, validate_data
 from .check_equivalence_reviews import frozen_candidates
 from .retrieval import LabelIndex, tokenize
-from .review_resolution import validate_compiled_resolution
+from .review_resolution import accepted_statuses, validate_compiled_resolution
 
 
 def normalized_text(text: str) -> str:
@@ -59,9 +59,7 @@ def load_adjudications(path: Path) -> tuple[dict, str, dict]:
     status = "assistant provisional, not expert or independent human validation"
     if receipt_path.is_file():
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if (receipt.get("status") not in {
-                "manual_equivalence_adjudication_compiled_no_automatic_agreement_to_gold",
-                "two_reader_equivalence_consensus_compiled_no_automatic_agreement_to_gold"} or
+        if (receipt.get("status") not in accepted_statuses("equivalence") or
                 receipt.get("final_sha256") != sha256(path.read_bytes()).hexdigest()):
             raise ValueError("Invalid compiled equivalence receipt")
         sources = receipt.get("source_sha256")
@@ -78,9 +76,9 @@ def load_adjudications(path: Path) -> tuple[dict, str, dict]:
         readers = receipt.get("reader_ids")
         if not isinstance(readers, list) or len(readers) != 2 or len(set(readers)) != 2:
             raise ValueError("Invalid independent equivalence reviewer identities")
-        status = ("independently_reviewed_two_reader_consensus_development_validation_subset"
-                  if receipt.get("resolution_mode") == "two_reader_consensus"
-                  else "independently_adjudicated_development_validation_subset")
+        status = {"two_reader_consensus": "independently_reviewed_two_reader_consensus_development_validation_subset",
+                  "human_expert_resolution": "human_expert_resolution_of_llm_annotation_development_validation_subset",
+                  }.get(receipt.get("resolution_mode"), "independently_adjudicated_development_validation_subset")
     adjudications = {}
     counts = {"accept": 0, "reject": 0, "uncertain": 0}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -145,7 +143,8 @@ def main() -> None:
     review_metric = ("partial_independent_review_complete" if
                      adjudication_status in {
                          "independently_adjudicated_development_validation_subset",
-                         "independently_reviewed_two_reader_consensus_development_validation_subset"}
+                         "independently_reviewed_two_reader_consensus_development_validation_subset",
+                         "human_expert_resolution_of_llm_annotation_development_validation_subset"}
                      else "provisional_review_complete")
     counts = {method: {"eligible": 0, "literal_complete": 0, "exact_equiv_complete": 0,
                        review_metric: 0} for method in ("bm25", "ontology_cover")}

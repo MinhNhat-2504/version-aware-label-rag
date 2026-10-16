@@ -12,7 +12,7 @@ from .data import read_jsonl
 from .holdout_reporting import COHORTS, cohort_for, sample_flow
 from .prepare_holdout_eval import DEFAULT_GOLD, load_manual_gold
 from .summarize_holdout_retrieval import METHODS, paired_summary
-from .review_resolution import validate_compiled_resolution
+from .review_resolution import accepted_statuses, validate_compiled_resolution
 
 
 def summarize(gold: list[dict], packet: list[dict], private_key: dict,
@@ -164,9 +164,7 @@ def main() -> None:
         raise ValueError("Private method key does not match manual gold and blank packet")
     manifest_path = args.final_reviews.with_suffix(".manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if (manifest.get("status") not in {
-            "manual_answer_adjudication_compiled_no_automatic_agreement_to_gold",
-            "two_reader_answer_consensus_compiled_no_automatic_agreement_to_gold"} or
+    if (manifest.get("status") not in accepted_statuses("answer") or
             manifest.get("final_sha256") != sha256(args.final_reviews.read_bytes()).hexdigest() or
             manifest.get("items") != len(gold) * len(METHODS) or
             manifest.get("source_sha256", {}).get(str(args.packet)) != sha256(packet_bytes).hexdigest()):

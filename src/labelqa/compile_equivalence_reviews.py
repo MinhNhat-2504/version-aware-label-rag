@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .check_equivalence_reviews import (DECISIONS, DEFAULT_BLANK_A, DEFAULT_BLANK_B,
                                         DEFAULT_MANIFEST, check, frozen_candidates, indexed)
-from .review_resolution import resolution
+from .review_resolution import compiled_status, resolution
 
 
 def digest(path: Path) -> str:
@@ -83,9 +83,7 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in final),
                            encoding="utf-8")
-    receipt = {"status": ("two_reader_equivalence_consensus_compiled_no_automatic_agreement_to_gold"
-                           if resolution_mode == "two_reader_consensus"
-                           else "manual_equivalence_adjudication_compiled_no_automatic_agreement_to_gold"),
+    receipt = {"status": compiled_status("equivalence", resolution_mode),
                "items": len(final), "reader_ids": expected["reader_ids"],
                "resolution_mode": resolution_mode, "resolver_ids": resolver_ids,
                "adjudicator_id": final[0]["adjudicator_id"],

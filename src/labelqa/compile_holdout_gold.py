@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .check_holdout_reviews import CHANGE_JUDGMENTS, check, validate_evidence_spans
 from .data import portable_path, read_jsonl
-from .review_resolution import resolution
+from .review_resolution import compiled_status, is_llm, resolution
 
 
 IMMUTABLE_QUEUE_FIELDS = ("qid", "set_id", "spl_version", "status", "reasons",
@@ -128,12 +128,11 @@ def main() -> None:
         for row in accepted:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     manifest = {
-        "status": ("two_reader_consensus_compiled_no_automatic_agreement_to_gold"
-                   if resolution_mode == "two_reader_consensus"
-                   else "manual_adjudication_compiled_no_automatic_agreement_to_gold"),
+        "status": compiled_status("gold", resolution_mode),
         "candidate_items": len(candidates),
         "accepted": len(accepted), "excluded": len(excluded), "exclusions": excluded,
         "reader_ids": expected["reader_ids"],
+        "llm_annotator_ids": [reader for reader in expected["reader_ids"] if is_llm(reader)],
         "resolution_mode": resolution_mode, "resolver_ids": resolver_ids,
         "source_sha256": {str(path): sha256(path.read_bytes()).hexdigest()
                           for path in (args.candidates, args.reader_a, args.reader_b, args.adjudicated_queue)},

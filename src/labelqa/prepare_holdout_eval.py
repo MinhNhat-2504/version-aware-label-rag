@@ -15,7 +15,7 @@ from .learned_retrieval import FEATURE_NAMES, retrieve as learned_retrieve
 from .prompts import SYSTEM_PROMPT
 from .recent import parse_sections
 from .retrieval import LabelIndex
-from .review_resolution import validate_compiled_resolution
+from .review_resolution import accepted_statuses, validate_compiled_resolution
 from .spl_tables import StructuredPassage, parse_structured_passages, structured_manifest
 
 
@@ -31,9 +31,7 @@ def load_manual_gold(path: Path) -> tuple[list[dict], dict]:
     if not path.is_file() or not manifest_path.is_file():
         raise ValueError("Manual adjudicated gold and its manifest are required; candidate questions are not gold")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("status") not in {
-            "manual_adjudication_compiled_no_automatic_agreement_to_gold",
-            "two_reader_consensus_compiled_no_automatic_agreement_to_gold"}:
+    if manifest.get("status") not in accepted_statuses("gold"):
         raise ValueError("Gold manifest is not from the manual adjudication compiler")
     if sha256(path.read_bytes()).hexdigest() != manifest.get("gold_sha256"):
         raise ValueError("Adjudicated gold checksum changed")

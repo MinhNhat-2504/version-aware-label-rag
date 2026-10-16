@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 
 from .data import read_jsonl
-from .review_resolution import resolution
+from .review_resolution import compiled_status, resolution
 from .score_qa import score_one
 
 
@@ -150,7 +150,7 @@ def check(packet: list[dict], first: dict[str, dict], second: dict[str, dict],
         queue.append({"review_id": rid, "qid": item["qid"], "status": "needs_adjudication",
                       "reasons": reasons, "reader_a": a, "reader_b": b,
                       "resolution_mode": "", "consensus_reviewer_ids": [],
-                      "adjudicator_id": "", "adjudication_notes": "",
+                      "expert_resolver_id": "", "adjudicator_id": "", "adjudication_notes": "",
                       **{f"final_{key}": [] if key == "claim_judgments" else "" if key == "review_status" else None
                          for key in FIELDS}})
     return {"status": "two_independent_answer_reviews_checked_manual_adjudication_required",
@@ -226,9 +226,7 @@ def main() -> None:
     resolver_ids = final[0]["resolver_ids"]
     args.output.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in final),
                            encoding="utf-8")
-    manifest = {"status": ("two_reader_answer_consensus_compiled_no_automatic_agreement_to_gold"
-                            if resolution_mode == "two_reader_consensus"
-                            else "manual_answer_adjudication_compiled_no_automatic_agreement_to_gold"),
+    manifest = {"status": compiled_status("answer", resolution_mode),
                 "items": len(final), "reader_ids": expected["reader_ids"],
                 "agreement_counts": expected["agreement_counts"],
                 "resolution_mode": resolution_mode, "resolver_ids": resolver_ids,
