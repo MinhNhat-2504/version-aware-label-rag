@@ -37,6 +37,15 @@ class HoldoutReviewTests(unittest.TestCase):
         self.assertTrue(report["all_items_require_manual_adjudication"])
         self.assertEqual(report["queue"][0]["status"], "needs_adjudication")
 
+    def test_single_reader_self_check_writes_no_queue(self):
+        records = {Path("candidate"): {"q": self.candidate}, Path("a"): {"q": self.a}}
+        with patch("labelqa.check_holdout_reviews.index_reviews", side_effect=lambda p: records[p]):
+            with patch("labelqa.check_holdout_reviews.read_jsonl", return_value=iter([self.source])):
+                report = check(Path("candidate"), Path("a"), None)
+        self.assertEqual(report["status"], "single_reader_self_check_passed_not_adjudication")
+        self.assertNotIn("queue", report)
+        self.assertEqual(report["decisions"], {"accept": 1})
+
     def test_same_reviewer_is_rejected(self):
         self.b["reviewer_id"] = "reader-a"
         with self.assertRaisesRegex(ValueError, "distinct"):

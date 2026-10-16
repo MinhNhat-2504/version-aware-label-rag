@@ -88,14 +88,19 @@ def index_reviews(path: Path) -> dict[str, dict]:
     return by_id
 
 
-def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = None) -> dict:
+def check(candidates: Path, first: Path, second: Path | None, xml_dir: Path | None = None) -> dict:
+    """Validate two reader files and queue them; with no second file, self-check one reader."""
     goldless = index_reviews(candidates)
-    a, b = index_reviews(first), index_reviews(second)
+    a = index_reviews(first)
+    b = index_reviews(second) if second is not None else a
     if set(a) != set(goldless) or set(b) != set(goldless):
         raise ValueError("Review qids must exactly match the candidate set")
     ids_a = {row.get("reviewer_id", "").strip() for row in a.values()}
     ids_b = {row.get("reviewer_id", "").strip() for row in b.values()}
-    if len(ids_a) != 1 or len(ids_b) != 1 or "" in ids_a | ids_b or ids_a == ids_b:
+    if second is None:
+        if len(ids_a) != 1 or "" in ids_a:
+            raise ValueError("One stable, nonempty reviewer ID is required")
+    elif len(ids_a) != 1 or len(ids_b) != 1 or "" in ids_a | ids_b or ids_a == ids_b:
         raise ValueError("Two distinct, nonempty reviewer IDs are required")
     source_index = {}
     for source in {portable_path(row["source_snapshot"]) for row in goldless.values()}:
@@ -104,6 +109,7 @@ def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = No
                 source_index[(pair["set_id"], version["spl_version"])] = version
     queue = []
     counts = Counter()
+    single_counts = Counter()
     passage_cache: dict = {}
     for qid, candidate in goldless.items():
         left, right = a[qid], b[qid]
@@ -112,7 +118,7 @@ def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = No
             raise ValueError(f"Pinned source identity/hash mismatch for {qid}")
         sections = {s["section_index"]: s["text"] for s in pinned["sections"]}
         valid_sections = set(sections)
-        for review in (left, right):
+        for review in ((left, right) if second is not None else (left,)):
             if any(review.get(key) != candidate.get(key)
                    for key in ("set_id", "spl_version", "xml_sha256", "question")):
                 raise ValueError(f"Source identity/question mismatch for {qid}")
@@ -145,6 +151,9 @@ def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = No
                 elif (review.get("required_claims") or review.get("acceptable_section_indices_per_claim")
                       or review.get("acceptable_evidence_spans_per_claim")):
                     raise ValueError(f"Unanswerable item has positive evidence claims for {qid}")
+        single_counts.update([left["item_decision"]])
+        if second is None:
+            continue
         status = "needs_adjudication"
         reasons = []
         if left["item_decision"] != right["item_decision"]:
@@ -171,6 +180,10 @@ def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = No
                       "final_acceptable_evidence_spans_per_claim": [],
                       "final_version_change_judgment": "",
                       "adjudication_notes": ""})
+    if second is None:
+        return {"status": "single_reader_self_check_passed_not_adjudication",
+                "reader_ids": [next(iter(ids_a))], "items": len(a),
+                "decisions": dict(single_counts), "locators_checked": xml_dir is not None}
     return {"reader_ids": [next(iter(ids_a)), next(iter(ids_b))], "items": len(queue),
             "decision_pairs": dict(counts), "all_items_require_manual_adjudication": True,
             "queue": queue}
@@ -180,7 +193,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path, default=Path("data/holdout/version_question_candidates_expanded.jsonl"))
     parser.add_argument("--reader-a", type=Path, required=True)
-    parser.add_argument("--reader-b", type=Path, required=True)
+    parser.add_argument("--reader-b", type=Path,
+                        help="Omit to self-check one reader file; no queue is written")
     parser.add_argument("--output", type=Path, default=Path("data/review/version_holdout_adjudication_queue.json"))
     parser.add_argument("--xml-dir", type=Path, default=Path("results/pinned_xml_holdout_review"),
                         help="Pinned review XML used to verify prose-window and table-row locators")
@@ -190,6 +204,9 @@ def main() -> None:
         parser.error(f"Review XML not found in {args.xml_dir}; run labelqa.fetch_review_xml first")
     report = check(args.candidates, args.reader_a, args.reader_b,
                    None if args.skip_locator_check else args.xml_dir)
+    if args.reader_b is None:
+        print(json.dumps(report, ensure_ascii=False))
+        return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"items": report["items"], "decision_pairs": report["decision_pairs"],
