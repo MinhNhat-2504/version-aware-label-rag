@@ -1,0 +1,68 @@
+# Version-Aware Label RAG
+
+Source code for reproducible, evidence-complete and version-aware question answering over FDA drug labels.
+
+This repository contains the retrieval, structured SPL parsing, evaluation, provenance, review-validation and reporting code. Research data, holdout sources, reviewer exports, results and manuscript files are intentionally excluded from Git.
+
+## Research boundary
+
+The implementation separates:
+
+- retrieval completeness for every atomic claim;
+- citation location and textual claim support;
+- answer completeness and refusal behavior;
+- exact SPL version identity;
+- development experiments from a sealed temporal holdout.
+
+No clinical reliability claim should be inferred from the source code or synthetic tests.
+
+## Repository layout
+
+```text
+src/labelqa/       Python research pipeline
+tests/             Synthetic and unit tests
+reviewer_ui/       Offline reviewer application source
+.github/workflows  Cross-platform CI
+```
+
+## Requirements
+
+- Python 3.10 or newer
+- Node.js only for optional JavaScript syntax checking
+- No required Python runtime dependencies outside the standard library
+
+## Run the test suite
+
+PowerShell:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest discover -s tests -v
+python -m labelqa.repository_preflight --scope source
+```
+
+Linux or macOS:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python -m labelqa.repository_preflight --scope source
+```
+
+## Reviewer interface
+
+The static application lives in `reviewer_ui/dist/`. Its generated `review-data.js` is excluded because it contains the private source packet. With authorized local data present, generate it using:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m labelqa.export_reviewer_interface
+```
+
+Then open `reviewer_ui/dist/index.html`. See `reviewer_ui/README.md` for the annotation workflow.
+
+## Data and artifacts
+
+The pipeline expects project-local `data/`, `results/` and `paper/` directories for full experiments. They are excluded from the source repository. Frozen inputs and outputs should be transferred through a controlled research archive with their SHA-256 manifests.
+
+## Repository policy
+
+See [REPOSITORY_RELEASE.md](REPOSITORY_RELEASE.md) for release checks and repository settings. A project license must be selected by the owner before a public release.

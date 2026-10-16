@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LabelQA · Phiếu thẩm định nguồn</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LABELQA · INDEPENDENT SOURCE REVIEW</p>
+      <h1>Phiếu thẩm định nguồn theo cặp phiên bản</h1>
+    </div>
+    <div class="seal"><span aria-hidden="true">●</span> Holdout vẫn niêm phong · không có đầu ra mô hình</div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Điều hướng thẩm định">
+      <section class="identity-card">
+        <label for="reviewer-id">Mã reviewer độc lập</label>
+        <input id="reviewer-id" autocomplete="off" placeholder="Ví dụ: reader_a_01">
+        <p>Giữ một mã duy nhất cho toàn bộ phiếu. Không nhập tên hay email.</p>
+      </section>
+
+      <section class="progress-card" aria-live="polite">
+        <div class="progress-label"><strong id="progress-text">0 / 24</strong><span>mục hợp lệ</span></div>
+        <div class="progress-track"><span id="progress-bar"></span></div>
+      </section>
+
+      <nav>
+        <div class="nav-heading"><span>12 cặp phiên bản</span><button id="toggle-list" class="text-button" type="button">Thu gọn</button></div>
+        <ol id="pair-list" class="pair-list"></ol>
+      </nav>
+
+      <section class="file-actions">
+        <button id="export-jsonl" class="primary-button" type="button">Xuất JSONL hoàn chỉnh</button>
+        <button id="backup-json" class="secondary-button" type="button">Tải bản nháp</button>
+        <label class="secondary-button file-label" for="import-file">Nhập bản đã lưu</label>
+        <input id="import-file" class="visually-hidden" type="file" accept=".json,.jsonl,application/json">
+        <button id="clear-local" class="danger-button" type="button">Xóa bản lưu trên máy</button>
+      </section>
+    </aside>
+
+    <main id="workspace" class="workspace">
+      <section class="intro-card">
+        <div>
+          <p class="step-label" id="pair-position">Cặp 1 / 12</p>
+          <h2 id="drug-title"></h2>
+          <p class="question" id="question"></p>
+        </div>
+        <div class="pair-controls">
+          <button id="previous-pair" class="icon-button" type="button" aria-label="Cặp trước">←</button>
+          <button id="next-pair" class="icon-button" type="button" aria-label="Cặp sau">→</button>
+        </div>
+      </section>
+
+      <section class="method-note">
+        <strong>Cách đọc:</strong> đánh giá từng phiên bản độc lập. Danh sách section giữ nguyên thứ tự nguồn; ô tìm kiếm chỉ lọc chữ và không xếp hạng. Bôi đen đúng câu trong nguồn để thêm bằng chứng vào claim đang chọn.
+      </section>
+
+      <section id="versions" class="versions" aria-label="Hai phiên bản cần so sánh"></section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="validation-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">KIỂM TRA PHIẾU</p><h2>Chưa thể xuất JSONL hoàn chỉnh</h2></div>
+        <button class="icon-button" value="close" aria-label="Đóng">×</button>
+      </div>
+      <p id="validation-summary"></p>
+      <ol id="validation-errors" class="validation-errors"></ol>
+      <button class="primary-button" value="close">Quay lại sửa</button>
+    </form>
+  </dialog>
+
+  <script src="review-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
