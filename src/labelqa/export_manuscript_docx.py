@@ -264,7 +264,7 @@ def build_docx_bytes(source: str) -> bytes:
         "Target": "docProps/core.xml"})
     core = ET.Element(tag(CP, "coreProperties"))
     ET.SubElement(core, tag(DC, "title")).text = "Evidence-Complete and Version-Aware Question Answering over FDA Drug Labels"
-    ET.SubElement(core, tag(DC, "creator")).text = "ADMET research project"
+    ET.SubElement(core, tag(DC, "creator")).text = "Version-aware label RAG research project"
     ET.SubElement(core, tag(DC, "description")).text = "Working manuscript; preliminary results only"
     modified = ET.SubElement(core, tag(DCTERMS, "modified"))
     modified.set(tag(XSI, "type"), "dcterms:W3CDTF")
