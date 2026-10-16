@@ -15,6 +15,7 @@ REPORTS = (
     "results/dense_validation.json",
     "results/retrieval_gate_validation.json",
     "results/clause_coverage_ablation.json",
+    "results/candidate_pool_diagnostics.json",
     "results/retrieval_error_analysis.json",
     "results/paired_dev_qa_manifest.json",
     "results/paired_dev_qa_comparison.json",
