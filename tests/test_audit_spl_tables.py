@@ -33,13 +33,14 @@ class TableLayoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             table_layout_rows(table)
 
-    def test_nested_table_fails_closed(self):
+    def test_nested_table_rows_stay_with_the_nested_table(self):
         table = ET.fromstring(
-            f'<table xmlns="{NS}"><tr><td><table><tr><td>Nested</td></tr>'
+            f'<table xmlns="{NS}"><tr><td>Outer <table><tr><td>Nested</td></tr>'
             '</table></td></tr></table>'
         )
-        with self.assertRaisesRegex(ValueError, "Nested SPL tables"):
-            table_layout_rows(table)
+        rows = table_layout_rows(table)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["cells"][0]["text"], "Outer")
 
 
 if __name__ == "__main__":

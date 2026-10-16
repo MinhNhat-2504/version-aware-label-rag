@@ -35,13 +35,37 @@ def narrative_text(node: ET.Element) -> str:
     return " ".join(" ".join(parts).split())
 
 
+def own_rows(table: ET.Element) -> list[ET.Element]:
+    """Rows of this table only; rows of a nested table belong to that nested table.
+
+    For a table without nested tables this equals ``table.findall('.//hl7:tr')``.
+    """
+    rows: list[ET.Element] = []
+
+    def visit(node: ET.Element) -> None:
+        for child in node:
+            name = local_name(child.tag)
+            if name == "table":
+                continue
+            if name == "tr":
+                rows.append(child)
+            else:
+                visit(child)
+
+    visit(table)
+    return rows
+
+
+def cell_text(cell: ET.Element) -> str:
+    """Cell text without any nested table, which is emitted as its own table."""
+    return narrative_text(cell) if cell.findall(".//hl7:table", NS) else flattened_text(cell)
+
+
 def table_layout_rows(table: ET.Element) -> list[dict]:
     """Expand XML cell spans into logical columns while retaining source row IDs."""
-    if table.findall(".//hl7:table", NS):
-        raise ValueError("Nested SPL tables need separate layout handling")
     carry: dict[int, dict] = {}
     results = []
-    for row_index, row in enumerate(table.findall(".//hl7:tr", NS)):
+    for row_index, row in enumerate(own_rows(table)):
         cells = [cell for cell in row if local_name(cell.tag) in ("td", "th")]
         occupied = set(carry)
         next_carry: dict[int, dict] = {}
@@ -59,7 +83,7 @@ def table_layout_rows(table: ET.Element) -> list[dict]:
                 column += 1
             placement = {"tag": local_name(cell.tag), "ordinal": ordinal,
                          "column": column, "colspan": colspan,
-                         "rowspan": rowspan, "text": flattened_text(cell)}
+                         "rowspan": rowspan, "text": cell_text(cell)}
             placements.append(placement)
             for position in range(column, column + colspan):
                 occupied.add(position)
