@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 label-evidence = "labelqa.cli:main"
+label-evidence-demo = "labelqa.synthetic_demo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

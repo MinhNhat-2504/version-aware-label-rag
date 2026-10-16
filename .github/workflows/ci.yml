@@ -27,3 +27,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m labelqa.repository_preflight --scope source
+      - name: Run synthetic end-to-end smoke demo
+        env:
+          PYTHONPATH: src
+        run: python -m labelqa.synthetic_demo --output synthetic-demo-report.json

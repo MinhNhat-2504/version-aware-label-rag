@@ -48,6 +48,17 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 PYTHONPATH=src python -m labelqa.repository_preflight --scope source
 ```
 
+## Run the synthetic pipeline demo
+
+The demo uses an embedded fictional SPL document. It parses narrative and a table row, runs six retrieval methods, builds a provenance-bound prompt and mechanically validates a constructed claim/citation response. It makes no model call and contains no research or holdout data.
+
+```powershell
+$env:PYTHONPATH='src'
+python -m labelqa.synthetic_demo --output results/synthetic-demo-report.json
+```
+
+A successful run returns `status: synthetic_smoke_passed`.
+
 ## Reviewer interface
 
 The static application lives in `reviewer_ui/dist/`. Its generated `review-data.js` is excluded because it contains the private source packet. With authorized local data present, generate it using:
