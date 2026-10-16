@@ -7,7 +7,11 @@
     throw new Error("Invalid reviewer data bundle");
   }
 
-  const packetHash = data.inputs_sha256["data/review/version_holdout_reader_a_blank.jsonl"];
+  const packetHash = data.inputs_sha256?.[data.packet_path];
+  if (typeof packetHash !== "string" || !/^[0-9a-f]{64}$/.test(packetHash)) {
+    document.body.innerHTML = "<main class='workspace'><h1>Không thể mở gói thẩm định</h1><p>Gói dữ liệu thiếu mã SHA-256 của phiếu trắng.</p></main>";
+    throw new Error("Reviewer data bundle has no packet hash");
+  }
   const storageKey = `labelqa-review:${packetHash}`;
   const pairs = data.pairs;
   const items = pairs.flatMap(pair => pair.items);
@@ -171,6 +175,8 @@
   function pairIsComplete(pair) {
     return pair.items.every(itemIsValid);
   }
+
+  document.querySelector("#pair-count").textContent = `${pairs.length} cặp phiên bản`;
 
   function renderProgress() {
     const valid = items.filter(itemIsValid).length;
@@ -546,9 +552,10 @@
   document.querySelector("#export-jsonl").addEventListener("click", () => {
     const errors = validateAll();
     if (errors.length) return showValidation(errors);
-    const content = makeExportRows().map(row => JSON.stringify(row)).join("\n") + "\n";
+    const rows = makeExportRows();
+    const content = rows.map(row => JSON.stringify(row)).join("\n") + "\n";
     download(`version_holdout_${state.reviewer_id.trim()}.jsonl`, content, "application/x-ndjson;charset=utf-8");
-    showToast("Đã xuất 24 dòng JSONL hợp lệ.");
+    showToast(`Đã xuất ${rows.length} dòng JSONL hợp lệ.`);
   });
 
   document.querySelector("#backup-json").addEventListener("click", () => {

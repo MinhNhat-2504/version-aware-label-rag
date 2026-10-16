@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 
+from .data import read_jsonl
 from .export_reviewer_interface import ROOT, build_payload, bundle_text
 
 
@@ -21,11 +22,13 @@ SOURCE_REQUIRED_FILES = (
     Path("reviewer_ui/dist/styles.css"),
     Path("reviewer_ui/dist/app.js"),
 )
+ACTIVE_CANDIDATES = Path("data/holdout/version_question_candidates_expanded.jsonl")
 FULL_ARTIFACT_FILES = (
     Path("paper/MANUSCRIPT_DRAFT.md"),
     Path("paper/MANUSCRIPT_DRAFT.docx"),
     Path("paper/RESULTS_MANIFEST.json"),
     Path("reviewer_ui/dist/review-data.js"),
+    ACTIVE_CANDIDATES,
 )
 SOURCE_FORBIDDEN_PREFIXES = ("data/", "paper/", "results/", "private_review/")
 SOURCE_FORBIDDEN_PATHS = {"reviewer_ui/dist/review-data.js"}
@@ -97,15 +100,18 @@ def check(scope: str, root: Path = ROOT) -> dict:
         actual = (root / "reviewer_ui/dist/review-data.js").read_text(encoding="utf-8")
         checks["reviewer_bundle_matches_frozen_inputs"] = actual == expected
         checks["reviewer_bundle_has_no_model_outputs"] = payload["model_outputs_included"] is False
-        checks["reviewer_bundle_has_12_pairs_24_items"] = (
-            len(payload["pairs"]) == 12 and len(payload["packet_rows"]) == 24
+        candidates = list(read_jsonl(root / ACTIVE_CANDIDATES))
+        checks["reviewer_bundle_covers_active_candidates"] = (
+            [row["qid"] for row in payload["packet_rows"]] == [row["qid"] for row in candidates]
+            and len(payload["pairs"]) == len({row["pair_id"] for row in candidates})
+            and len(payload["packet_rows"]) == 2 * len(payload["pairs"])
         )
         if not checks["reviewer_bundle_matches_frozen_inputs"]:
             blockers.append("reviewer bundle is stale; regenerate it before pushing")
         if not checks["reviewer_bundle_has_no_model_outputs"]:
             blockers.append("reviewer bundle unexpectedly includes model outputs")
-        if not checks["reviewer_bundle_has_12_pairs_24_items"]:
-            blockers.append("reviewer bundle item counts changed")
+        if not checks["reviewer_bundle_covers_active_candidates"]:
+            blockers.append("reviewer bundle does not match the active candidate questions")
 
     if scope != "source":
         manifest_path = root / "paper/RESULTS_MANIFEST.json"

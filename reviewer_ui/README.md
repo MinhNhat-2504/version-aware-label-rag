@@ -16,12 +16,12 @@ Sau đó mở `http://localhost:8765`.
 
 ## Quy trình reviewer
 
-1. Nhập một mã reviewer ẩn danh và giữ nguyên mã đó cho cả 24 mục.
+1. Nhập một mã reviewer ẩn danh và giữ nguyên mã đó cho mọi mục trong gói (bản mở rộng hiện tại: 60 cặp, 120 mục).
 2. Đọc câu hỏi và từng phiên bản nguồn độc lập.
 3. Chọn quyết định. Với `accept`, điền khả năng trả lời, câu trả lời độc lập và đánh giá thay đổi phiên bản.
 4. Nếu nguồn trả lời được, tạo từng claim nguyên tử, chọn claim đang làm việc, tìm section, bôi đen nguyên văn bằng chứng và thêm đoạn đã chọn.
 5. Với bằng chứng từ bảng, chọn `table_row` và điền chỉ số bảng/hàng không âm. Snapshot hiện lưu văn bản section đã làm phẳng; dùng liên kết đúng phiên bản DailyMed trong giao diện để đối chiếu bố cục. Pipeline vẫn chỉ tải và lưu bản XML cục bộ sau khi gold được khóa.
-6. Nút **Xuất JSONL hoàn chỉnh** chỉ tạo file khi cả 24 mục hợp lệ. Nút **Tải bản nháp** dùng để sao lưu giữa chừng và có thể nhập lại.
+6. Nút **Xuất JSONL hoàn chỉnh** chỉ tạo file khi mọi mục trong gói đều hợp lệ. Nút **Tải bản nháp** dùng để sao lưu giữa chừng và có thể nhập lại.
 
 Một file reviewer chưa phải gold. Cần hai reviewer độc lập, sau đó hòa giải bằng đồng thuận theo pipeline hiện tại.
 

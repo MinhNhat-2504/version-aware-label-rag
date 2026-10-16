@@ -8,7 +8,7 @@ class ReviewerInterfaceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = ROOT / "results" / ".test-reviewer-fixture"
-        packet = cls.root / "data/review/version_holdout_reader_a_blank.jsonl"
+        packet = cls.root / "data/review/version_holdout_expanded_reader_a_blank.jsonl"
         snapshot = cls.root / "data/snapshots/version_holdout_sources.jsonl"
         packet.parent.mkdir(parents=True, exist_ok=True)
         snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -65,7 +65,8 @@ class ReviewerInterfaceTests(unittest.TestCase):
     def test_input_hash_keys_match_browser_lookup_on_every_platform(self):
         payload = build_payload(self.root)
         # reviewer_ui/dist/app.js binds autosave and draft import to this exact key.
-        self.assertIn("data/review/version_holdout_reader_a_blank.jsonl", payload["inputs_sha256"])
+        self.assertEqual(payload["packet_path"], "data/review/version_holdout_expanded_reader_a_blank.jsonl")
+        self.assertIn(payload["packet_path"], payload["inputs_sha256"])
         self.assertIn("data/snapshots/version_holdout_sources.jsonl", payload["inputs_sha256"])
         self.assertFalse(any("\\" in key for key in payload["inputs_sha256"]))
 

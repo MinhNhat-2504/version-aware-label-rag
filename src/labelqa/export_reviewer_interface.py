@@ -12,7 +12,7 @@ from .data import portable_path, read_jsonl
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PACKET = Path("data/review/version_holdout_reader_a_blank.jsonl")
+DEFAULT_PACKET = Path("data/review/version_holdout_expanded_reader_a_blank.jsonl")
 DEFAULT_OUTPUT = Path("reviewer_ui/dist/review-data.js")
 IDENTITY_FIELDS = (
     "qid", "pair_id", "set_id", "spl_version", "published_date", "xml_sha256",
@@ -75,7 +75,8 @@ def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
             raise ValueError(f"Expected exactly two versions for {pair['pair_id']}")
 
     # POSIX keys keep the bundle identical across platforms; app.js looks up the packet hash by them.
-    inputs = {portable_path(packet).as_posix(): file_sha256(packet_path)}
+    packet_key = portable_path(packet).as_posix()
+    inputs = {packet_key: file_sha256(packet_path)}
     for relative_path in snapshot_paths:
         path = relative_path if relative_path.is_absolute() else root / relative_path
         inputs[relative_path.as_posix()] = file_sha256(path)
@@ -91,6 +92,7 @@ def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
             "acceptable_section_indices_per_claim", "version_change_judgment",
             "clinical_significance", "notes", "acceptable_evidence_spans_per_claim",
         ],
+        "packet_path": packet_key,
         "inputs_sha256": inputs,
         "packet_rows": packet_rows,
         "pairs": ordered_pairs,
