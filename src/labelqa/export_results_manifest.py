@@ -12,6 +12,8 @@ REPORTS = (
     "results/learned_selector_dev_crossfit.json",
     "results/learned_selector_model.json",
     "results/learned_selector_validation.json",
+    "results/benchmark_test_retrieval.json",
+    "results/benchmark_test_predictions.jsonl",
     "results/dense_validation.json",
     "results/retrieval_gate_validation.json",
     "results/crossfit_retrieval_gate.json",
@@ -54,6 +56,7 @@ REPORTS = (
 SOURCES = (
     "data/upstream/FDARxBench/data/labels/labels.jsonl",
     "data/upstream/FDARxBench/data/qa/qa.jsonl",
+    "paper/BENCHMARK_TEST_LOCK.json",
     "data/holdout/version_question_candidates.jsonl",
     "data/holdout/version_test_manifest.json",
     "data/holdout/version_change_cohort_manifest.json",
@@ -80,7 +83,7 @@ def main() -> None:
         "artifacts": {path: describe(path) for path in REPORTS},
         "sources": {path: describe(path) for path in SOURCES},
         "human_review": "pending; no adjudicated gold or external holdout model scores",
-        "benchmark_test": "not evaluated",
+        "benchmark_test": "retrieval proxy evaluated once after paper/BENCHMARK_TEST_LOCK.json; no answer generation",
         "note": "The results directory and upstream snapshot are local/ignored; retain files with these hashes for reproduction.",
     }
     output = Path("paper/RESULTS_MANIFEST.json")
