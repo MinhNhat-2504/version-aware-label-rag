@@ -198,10 +198,15 @@
     return new Map(item.sections.map(section => [section.section_index, section.text]));
   }
 
+  function isLlmId(value) {
+    return String(value || "").trim().toLowerCase().startsWith("llm_");
+  }
+
   function itemErrors(item) {
     const review = reviewFor(item.qid);
     const errors = [];
     if (!state.reviewer_id.trim()) errors.push("Chưa nhập mã reviewer.");
+    if (isLlmId(state.reviewer_id)) errors.push("Mã bắt đầu bằng llm_ dành cho phiếu LLM; hãy dùng mã chuyên gia của bạn.");
     if (!["accept", "rewrite", "reject"].includes(review.item_decision)) {
       errors.push("Chưa chọn quyết định cho câu hỏi.");
       return errors;
@@ -470,6 +475,9 @@
     if (!Array.isArray(rows) || rows.length !== data.packet_rows.length) throw new Error(`Cần đúng ${data.packet_rows.length} dòng JSONL.`);
     const byQid = new Map(rows.map(row => [row.qid, row]));
     if (byQid.size !== rows.length || byQid.size !== fixedByQid.size) throw new Error("QID thiếu hoặc bị trùng.");
+    if (rows.some(row => isLlmId(row.reviewer_id))) {
+      throw new Error("File này là phiếu của LLM (mã bắt đầu bằng llm_). Chuyên gia không được nhập phiếu LLM; chỉ nhập phiếu hoặc bản nháp của chính mình.");
+    }
     const reviewerIds = new Set();
     for (const [qid, fixed] of fixedByQid) {
       const row = byQid.get(qid);
