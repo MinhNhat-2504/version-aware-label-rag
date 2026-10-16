@@ -248,7 +248,8 @@ def rehearse(root: Path, model: str) -> dict:
                                       f"data/review/{READERS[0]}.jsonl", f"data/review/{READERS[1]}.jsonl")
     queue, signed = "data/review/rehearsal_queue.json", "data/review/rehearsal_queue_signed.json"
     run.run("check_reader_files", "check_holdout_reviews", "--candidates", candidates,
-            "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue)
+            "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue,
+            "--xml-dir", "results/pinned_xml_holdout_after_gold")
     sign_gold_queue(root / queue, root / signed)
     run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,
             "--reader-b", reader_b, "--adjudicated-queue", signed)

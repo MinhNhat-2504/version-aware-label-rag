@@ -14,6 +14,8 @@ from .data import portable_path, read_jsonl
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PACKET = Path("data/review/version_holdout_expanded_reader_a_blank.jsonl")
 DEFAULT_OUTPUT = Path("reviewer_ui/dist/review-data.js")
+DEFAULT_XML_DIR = Path("results/pinned_xml_holdout_review")
+PASSAGE_KINDS = {"prose": 0, "table_row": 1}
 IDENTITY_FIELDS = (
     "qid", "pair_id", "set_id", "spl_version", "published_date", "xml_sha256",
     "source_url", "source_snapshot", "question", "question_origin", "annotation_status",
@@ -24,8 +26,24 @@ def file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
-def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
+def locator_passages(xml_path: Path, xml_sha256: str) -> list[list]:
+    """Compact parsed passages: [kind, section, table, row, text], kind 0=prose, 1=table row.
+
+    These are the same units the post-gold mapper uses, in source order and unranked.
+    """
+    from .spl_tables import parse_structured_passages
+    xml_bytes = xml_path.read_bytes()
+    if file_sha256(xml_path) != xml_sha256:
+        raise ValueError(f"Review XML checksum mismatch: {xml_path.name}")
+    return [[PASSAGE_KINDS[p.kind], p.section_index, p.table_index, p.row_index, p.text]
+            for p in parse_structured_passages(xml_bytes)]
+
+
+def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET,
+                  xml_dir: Path = DEFAULT_XML_DIR) -> dict:
     root = root.resolve()
+    xml_root = xml_dir if xml_dir.is_absolute() else root / xml_dir
+    with_locators = xml_root.is_dir()
     packet_path = packet if packet.is_absolute() else root / packet
     rows = list(read_jsonl(packet_path))
     if not rows:
@@ -59,6 +77,9 @@ def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
         if not source.get("sections"):
             raise ValueError(f"Pinned source has no sections for {row['qid']}")
         item = {**row, "title": titles[row["set_id"]], "sections": source["sections"]}
+        if with_locators:
+            item["locator_passages"] = locator_passages(
+                xml_root / f"{row['set_id']}_v{row['spl_version']}.xml", row["xml_sha256"])
         pair = pairs.setdefault(row["pair_id"], {
             "pair_id": row["pair_id"], "set_id": row["set_id"],
             "title": titles[row["set_id"]], "question": row["question"], "items": [],
@@ -84,6 +105,7 @@ def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
         "schema_version": "1.0",
         "dataset": "sealed_version_holdout_human_review",
         "model_outputs_included": False,
+        "locator_passages_from_pinned_xml": with_locators,
         "review_status": "candidate_pending_two_independent_readers",
         "identity_fields": list(IDENTITY_FIELDS),
         "annotation_fields": [

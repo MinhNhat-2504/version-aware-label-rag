@@ -102,6 +102,46 @@
     return String(value ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
   }
 
+  // Parsed XML passages: [kind, section, table, row, text]; kind 0 = prose window, 1 = table row.
+  const KIND_CODE = { prose: 0, table_row: 1 };
+  function locatorMatches(item, sectionIndex, quote) {
+    if (!Array.isArray(item.locator_passages)) return null;
+    const needle = normalize(quote);
+    return item.locator_passages.filter(p => p[1] === sectionIndex && normalize(p[4]).includes(needle));
+  }
+
+  function spanIsMappable(item, span) {
+    if (!Array.isArray(item.locator_passages)) return true;
+    const needle = normalize(span.quote);
+    return item.locator_passages.some(p => p[1] === span.section_index && p[0] === KIND_CODE[span.source_kind]
+      && (span.source_kind !== "table_row" || (p[2] === span.table_index && p[3] === span.row_index))
+      && normalize(p[4]).includes(needle));
+  }
+
+  function suggestLocator(card, item, selection) {
+    const hint = card.querySelector("[data-role='locator-hint']");
+    const matches = locatorMatches(item, selection.section_index, selection.quote);
+    if (!hint || matches === null) return;
+    const kind = card.querySelector("[data-role='source-kind']");
+    const table = card.querySelector("[data-role='table-index']");
+    const row = card.querySelector("[data-role='row-index']");
+    const rows = matches.filter(p => p[0] === 1);
+    const prose = matches.filter(p => p[0] === 0);
+    const setTable = enabled => { table.disabled = !enabled; row.disabled = !enabled; };
+    if (prose.length) {
+      kind.value = "prose"; setTable(false); table.value = ""; row.value = "";
+      hint.textContent = "✓ Đoạn nằm trong văn xuôi; loại nguồn: Văn xuôi.";
+    } else if (rows.length === 1) {
+      kind.value = "table_row"; setTable(true); table.value = rows[0][2]; row.value = rows[0][3];
+      hint.textContent = `✓ Đoạn nằm trong bảng ${rows[0][2]}, hàng ${rows[0][3]}; đã điền sẵn tọa độ. Kiểm tra lại đúng hàng thuốc/đối tượng đang hỏi.`;
+    } else if (rows.length > 1) {
+      kind.value = "table_row"; setTable(true); table.value = ""; row.value = "";
+      hint.textContent = `Đoạn này xuất hiện ở ${rows.length} hàng bảng (${rows.map(p => `bảng ${p[2]} hàng ${p[3]}`).join(", ")}). Bôi đen dài hơn trong đúng ô để xác định một hàng.`;
+    } else {
+      hint.textContent = "⚠ Đoạn bôi đen không nằm trọn trong một đoạn văn hoặc một hàng bảng. Hãy chọn đoạn ngắn hơn, nằm trong một ô bảng hoặc một câu văn.";
+    }
+  }
+
   function showToast(message) {
     dom.toast.textContent = message;
     dom.toast.classList.add("show");
@@ -158,6 +198,9 @@
           }
         } else if (span.table_index != null || span.row_index != null) {
           errors.push(`${prefix}: nguồn prose không được có tọa độ bảng.`);
+        }
+        if (sections.has(span.section_index) && ["prose", "table_row"].includes(span.source_kind) && !spanIsMappable(item, span)) {
+          errors.push(`${prefix}: trích dẫn không nằm trọn trong một ${span.source_kind === "table_row" ? `hàng bảng (bảng ${span.table_index}, hàng ${span.row_index})` : "đoạn văn xuôi"} của XML đã ghim.`);
         }
       });
     });
@@ -266,7 +309,7 @@
           <div class="section-heading"><h4>Nguồn đóng băng · ${item.sections.length} sections</h4><span class="help">Không xếp hạng</span></div>
           <div class="source-tools-row"><input class="source-search" type="search" data-action="search" placeholder="Lọc theo tiêu đề hoặc nội dung section" value="${escapeHtml(sourceView[item.qid]?.query || "")}"><button class="small-button" type="button" data-action="clear-search">Xóa lọc</button></div>
           <p class="source-count" data-role="source-count"></p>
-          <p class="table-notice">Văn bản bảng trong snapshot đã được làm phẳng. Với bằng chứng hàng bảng, hãy đối chiếu bố cục ở liên kết đúng phiên bản phía trên trước khi ghi tọa độ.</p>
+          <p class="table-notice">Văn bản bảng trong snapshot đã được làm phẳng. Bôi đen trong một ô để giao diện tìm đúng hàng; nếu hàng có ô gộp hoặc nhiều tầng tiêu đề, ghi chú lại để người hòa giải kiểm tra.</p>
         </div>
         <div class="selection-tray conditional" ${accepted && answerable ? "" : "hidden"}>
           <h4>Đoạn đang chọn ${activeClaim[item.qid] == null ? "· hãy chọn một claim" : `· gắn vào claim ${activeClaim[item.qid] + 1}`}</h4>
@@ -277,7 +320,7 @@
             <label>Chỉ số hàng<input data-role="row-index" type="number" min="0" step="1" disabled></label>
             <button class="primary-button" type="button" data-action="add-evidence">Thêm bằng chứng</button>
           </div>
-          <p class="help">Với hàng bảng, đối chiếu tọa độ bằng XML nguồn sau khi được mở khóa. Trích dẫn vẫn phải khớp văn bản snapshot.</p>
+          <p class="help locator-hint" data-role="locator-hint">${Array.isArray(item.locator_passages) ? "Bôi đen một đoạn; giao diện sẽ nhận loại nguồn và tọa độ bảng/hàng từ XML đã ghim." : "Gói này chưa có XML ghim; phải tự nhập tọa độ bảng/hàng."}</p>
         </div>
         <div class="sections" data-role="sections"></div>
         <button class="secondary-button load-more" type="button" data-action="load-more" hidden>Xem thêm sections</button>
@@ -495,7 +538,8 @@
     const tray = card.querySelector(".selection-tray");
     if (tray && !tray.hidden) {
       tray.querySelector(".selected-quote").textContent = `§${details.dataset.section}: “${quote}”`;
-      showToast("Đã giữ đoạn bôi đen. Chọn loại nguồn rồi thêm vào claim.");
+      suggestLocator(card, itemByQid.get(card.dataset.qid), lastSelection[card.dataset.qid]);
+      showToast("Đã giữ đoạn bôi đen. Kiểm tra loại nguồn rồi thêm vào claim.");
     }
   });
 
@@ -534,6 +578,9 @@
           return showToast("Nhập chỉ số bảng và hàng là số nguyên không âm.");
         }
         span.table_index = Number(table); span.row_index = Number(row);
+      }
+      if (!spanIsMappable(itemByQid.get(qid), span)) {
+        return showToast("Trích dẫn không nằm trọn trong một đoạn/hàng của XML đã ghim; chọn lại đoạn ngắn hơn.");
       }
       review.claims[claimIndex].evidence.push(span);
       lastSelection[qid] = null;

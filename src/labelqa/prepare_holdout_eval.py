@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 
-from .check_holdout_reviews import normalized
+from .check_holdout_reviews import span_in_passage
 from .data import Label, portable_path, read_jsonl
 from .holdout_reporting import sample_flow
 from .learned_retrieval import FEATURE_NAMES, retrieve as learned_retrieve
@@ -79,15 +79,7 @@ def passage_groups(claims: list[dict], passages: list[StructuredPassage], qid: s
     for claim in claims:
         accepted = set()
         for span in claim["acceptable_evidence_spans"]:
-            for passage in passages:
-                if passage.section_index != span["section_index"] or passage.kind != span["source_kind"]:
-                    continue
-                if passage.kind == "table_row" and (
-                    passage.table_index != span["table_index"] or passage.row_index != span["row_index"]
-                ):
-                    continue
-                if normalized(span["quote"]) in normalized(passage.text):
-                    accepted.add(passage.passage_id)
+            accepted.update(passage.passage_id for passage in passages if span_in_passage(span, passage))
         if not accepted:
             raise ValueError(f"No parsed passage covers adjudicated claim span for {qid}")
         groups.append(sorted(accepted))

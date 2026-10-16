@@ -18,6 +18,39 @@ def normalized(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
+def span_in_passage(span: dict, passage) -> bool:
+    """The post-gold mapping rule: same section and kind, exact row, quote inside one passage."""
+    if passage.section_index != span["section_index"] or passage.kind != span["source_kind"]:
+        return False
+    if passage.kind == "table_row" and (passage.table_index != span.get("table_index")
+                                         or passage.row_index != span.get("row_index")):
+        return False
+    return normalized(span["quote"]) in normalized(passage.text)
+
+
+def validate_span_locators(qid: str, span_groups: list[list[dict]], passages: list) -> None:
+    """Fail now if a reader span could not be mapped to a parsed passage after gold."""
+    for claim_index, spans in enumerate(span_groups, 1):
+        for span in spans:
+            if not any(span_in_passage(span, passage) for passage in passages):
+                where = (f"table {span.get('table_index')}, row {span.get('row_index')}"
+                         if span["source_kind"] == "table_row" else "prose window")
+                raise ValueError(f"Claim {claim_index} quote is not inside one parsed {where} "
+                                 f"of section {span['section_index']} for {qid}")
+
+
+def xml_passages(xml_dir: Path, set_id: str, version: int, xml_sha256: str, cache: dict) -> list:
+    key = (set_id, version)
+    if key not in cache:
+        from hashlib import sha256
+        from .spl_tables import parse_structured_passages
+        xml_bytes = (xml_dir / f"{set_id}_v{version}.xml").read_bytes()
+        if sha256(xml_bytes).hexdigest() != xml_sha256:
+            raise ValueError(f"Review XML checksum mismatch for {set_id} v{version}")
+        cache[key] = parse_structured_passages(xml_bytes)
+    return cache[key]
+
+
 def validate_evidence_spans(qid: str, claims: list[str], section_groups: list[list[int]],
                             span_groups: list[list[dict]], sections: dict[int, str]) -> None:
     if len(span_groups) != len(claims):
@@ -55,7 +88,7 @@ def index_reviews(path: Path) -> dict[str, dict]:
     return by_id
 
 
-def check(candidates: Path, first: Path, second: Path) -> dict:
+def check(candidates: Path, first: Path, second: Path, xml_dir: Path | None = None) -> dict:
     goldless = index_reviews(candidates)
     a, b = index_reviews(first), index_reviews(second)
     if set(a) != set(goldless) or set(b) != set(goldless):
@@ -71,6 +104,7 @@ def check(candidates: Path, first: Path, second: Path) -> dict:
                 source_index[(pair["set_id"], version["spl_version"])] = version
     queue = []
     counts = Counter()
+    passage_cache: dict = {}
     for qid, candidate in goldless.items():
         left, right = a[qid], b[qid]
         pinned = source_index.get((candidate["set_id"], candidate["spl_version"]))
@@ -103,6 +137,11 @@ def check(candidates: Path, first: Path, second: Path) -> dict:
                     validate_evidence_spans(qid, review["required_claims"],
                                             review["acceptable_section_indices_per_claim"],
                                             review.get("acceptable_evidence_spans_per_claim", []), sections)
+                    if xml_dir is not None:
+                        validate_span_locators(qid, review["acceptable_evidence_spans_per_claim"],
+                                               xml_passages(xml_dir, candidate["set_id"],
+                                                            candidate["spl_version"],
+                                                            candidate["xml_sha256"], passage_cache))
                 elif (review.get("required_claims") or review.get("acceptable_section_indices_per_claim")
                       or review.get("acceptable_evidence_spans_per_claim")):
                     raise ValueError(f"Unanswerable item has positive evidence claims for {qid}")
@@ -143,8 +182,14 @@ def main() -> None:
     parser.add_argument("--reader-a", type=Path, required=True)
     parser.add_argument("--reader-b", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("data/review/version_holdout_adjudication_queue.json"))
+    parser.add_argument("--xml-dir", type=Path, default=Path("results/pinned_xml_holdout_review"),
+                        help="Pinned review XML used to verify prose-window and table-row locators")
+    parser.add_argument("--skip-locator-check", action="store_true")
     args = parser.parse_args()
-    report = check(args.candidates, args.reader_a, args.reader_b)
+    if not args.skip_locator_check and not args.xml_dir.is_dir():
+        parser.error(f"Review XML not found in {args.xml_dir}; run labelqa.fetch_review_xml first")
+    report = check(args.candidates, args.reader_a, args.reader_b,
+                   None if args.skip_locator_check else args.xml_dir)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"items": report["items"], "decision_pairs": report["decision_pairs"],
