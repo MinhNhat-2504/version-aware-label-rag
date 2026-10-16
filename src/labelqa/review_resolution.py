@@ -74,6 +74,17 @@ def compiled_status(kind: str, mode: str) -> str:
     return f"manual_{prefix}adjudication_compiled_no_automatic_agreement_to_gold"
 
 
+def review_design(manifest: dict) -> dict:
+    """Who reviewed and who signed, for reports; LLM IDs are always listed separately."""
+    readers = list(manifest.get("reader_ids") or [])
+    llm = [reader for reader in readers if is_llm(reader)]
+    return {"resolution_mode": manifest.get("resolution_mode"),
+            "resolver_ids": manifest.get("resolver_ids"),
+            "reader_ids": readers, "llm_annotator_ids": llm,
+            "agreement_kind": ("expert_llm_agreement_not_inter_human_reliability" if llm
+                               else "inter_reader_agreement")}
+
+
 def accepted_statuses(kind: str) -> set[str]:
     return {compiled_status(kind, mode) for mode in MODES}
 

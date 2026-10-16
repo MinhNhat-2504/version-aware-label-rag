@@ -11,6 +11,7 @@ from random import Random
 from .data import portable_path
 from .holdout_reporting import cohort_for, sample_flow
 from .prepare_holdout_eval import DEFAULT_GOLD, load_manual_gold, model_weights
+from .review_resolution import review_design
 
 
 METHODS = ("bm25", "learned_cover", "ontology_cover")
@@ -154,6 +155,7 @@ def main() -> None:
                for method, path in paths.items()}
     report = summarize(gold, prompts)
     report["sample_flow"] = sample_flow(gold, receipt)
+    report["gold_review_design"] = review_design(receipt)
     report["gold_sha256"] = receipt["gold_sha256"]
     report["execution_lock_sha256"] = lock_hash
     report["prompt_sha256"] = {method: sha256(path.read_bytes()).hexdigest()

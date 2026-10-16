@@ -29,20 +29,27 @@ def file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
-def blind_receipt(report: dict, reader: Path, candidates: Path) -> dict:
+def blind_receipt(report: dict, reader: Path, basis: Path, basis_key: str = "candidates_sha256",
+                  status: str = BLIND_RECEIPT_STATUS) -> dict:
     """Freeze a human file's hash and time before the LLM file or queue is shown."""
     reviewer = report["reader_ids"][0]
     if is_llm(reviewer):
         raise ValueError("LLM annotations use their provenance receipt, not a blind human receipt")
-    return {"status": BLIND_RECEIPT_STATUS, "reviewer_id": reviewer,
+    return {"status": status, "reviewer_id": reviewer,
             "reader_file": reader.as_posix(), "reader_sha256": file_sha256(reader),
-            "candidates_sha256": file_sha256(candidates),
+            basis_key: file_sha256(basis),
             "received_utc": datetime.now(timezone.utc).isoformat(), "self_check": report}
 
 
-def verify_blind_receipts(reader_paths: dict[str, Path], candidates: Path,
-                          human_receipt: Path | None, llm_provenance: Path | None) -> dict:
-    """Check the human blind receipt and the LLM provenance against the exact reader bytes."""
+def verify_blind_receipts(reader_paths: dict[str, Path], basis: Path,
+                          human_receipt: Path | None, llm_provenance: Path | None,
+                          basis_key: str = "candidates_sha256", human_status: str = BLIND_RECEIPT_STATUS,
+                          llm_status: str = LLM_PROVENANCE_STATUS) -> dict:
+    """Check the human blind receipt and the LLM provenance against the exact reader bytes.
+
+    ``basis`` is the frozen file both readers worked from: the candidate questions for
+    source review, or the method-blind packet for answer review.
+    """
     llm = [reader for reader in reader_paths if is_llm(reader)]
     human = [reader for reader in reader_paths if not is_llm(reader)]
     if len(llm) != 1 or len(human) != 1:
@@ -50,14 +57,14 @@ def verify_blind_receipts(reader_paths: dict[str, Path], candidates: Path,
     if human_receipt is None or llm_provenance is None:
         raise ValueError("An LLM annotation needs the human blind receipt and the LLM provenance receipt")
     receipt = json.loads(human_receipt.read_text(encoding="utf-8"))
-    if (receipt.get("status") != BLIND_RECEIPT_STATUS or receipt.get("reviewer_id") != human[0]
+    if (receipt.get("status") != human_status or receipt.get("reviewer_id") != human[0]
             or receipt.get("reader_sha256") != file_sha256(reader_paths[human[0]])
-            or receipt.get("candidates_sha256") != file_sha256(candidates)):
+            or receipt.get(basis_key) != file_sha256(basis)):
         raise ValueError("Human reader file differs from its blind receipt; it changed after freezing")
     provenance = json.loads(llm_provenance.read_text(encoding="utf-8"))
-    if (provenance.get("status") != LLM_PROVENANCE_STATUS or provenance.get("annotator_id") != llm[0]
+    if (provenance.get("status") != llm_status or provenance.get("annotator_id") != llm[0]
             or provenance.get("annotation_sha256") != file_sha256(reader_paths[llm[0]])
-            or provenance.get("candidates_sha256") != file_sha256(candidates)):
+            or provenance.get(basis_key) != file_sha256(basis)):
         raise ValueError("LLM annotation differs from its provenance receipt")
     return {"human_reader": {"receipt": human_receipt.as_posix(),
                              "receipt_sha256": file_sha256(human_receipt),

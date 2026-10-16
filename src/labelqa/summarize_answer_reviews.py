@@ -8,11 +8,23 @@ import json
 from pathlib import Path
 
 from .answer_review import FIELDS, mechanical, packet_index, validate_review
-from .data import read_jsonl
+from .data import portable_path, read_jsonl
 from .holdout_reporting import COHORTS, cohort_for, sample_flow
 from .prepare_holdout_eval import DEFAULT_GOLD, load_manual_gold
 from .summarize_holdout_retrieval import METHODS, paired_summary
-from .review_resolution import accepted_statuses, validate_compiled_resolution
+from .review_resolution import accepted_statuses, review_design, validate_compiled_resolution
+
+
+def limitations(answer_design: dict) -> list[str]:
+    if answer_design["llm_annotator_ids"]:
+        support = ("Clinical support is one human expert's signed resolution of their own blind review "
+                   "and a disclosed LLM answer review; agreement figures are expert-LLM agreement, "
+                   "not inter-human reliability.")
+    else:
+        support = ("Clinical support is based on preserved independent human reviews and a signed "
+                   "manual resolution.")
+    return [support, "Small numbers of label pairs make uncertainty intervals imprecise.",
+            "The method key is opened only after answer reviews are final."]
 
 
 def summarize(gold: list[dict], packet: list[dict], private_key: dict,
@@ -135,10 +147,7 @@ def summarize(gold: list[dict], packet: list[dict], private_key: dict,
             "paired_all_accepted": compare(all_qids),
             "paired_answerable_only": compare(answerable_qids),
             "by_cohort": by_cohort,
-            "per_item": per_item,
-            "limitations": ["Clinical support is based on preserved independent human reviews and a signed manual resolution.",
-                            "Small numbers of label pairs make uncertainty intervals imprecise.",
-                            "The method key is opened only after answer reviews are final."]}
+            "per_item": per_item}
 
 
 def main() -> None:
@@ -170,15 +179,20 @@ def main() -> None:
             manifest.get("source_sha256", {}).get(str(args.packet)) != sha256(packet_bytes).hexdigest()):
         raise ValueError("Final human answer reviews have no matching compiler manifest")
     for path, digest in manifest["source_sha256"].items():
-        if sha256(Path(path).read_bytes()).hexdigest() != digest:
+        if sha256(portable_path(path).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Original answer-review source changed: {path}")
+    for name, receipt in (manifest.get("blind_receipts") or {}).items():
+        path = portable_path(receipt.get("receipt") or receipt.get("provenance") or "")
+        expected = receipt.get("receipt_sha256") or receipt.get("provenance_sha256")
+        if not path.is_file() or sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Answer-review receipt changed or is missing: {name}")
     packet = list(read_jsonl(args.packet))
     final = list(read_jsonl(args.final_reviews))
     report = summarize(gold, packet, key, final)
     report["sample_flow"] = sample_flow(gold, gold_receipt)
     readers = manifest.get("reader_ids", [])
     if len(set(readers)) != 2:
-        raise ValueError("Human reviewer/adjudicator identities are invalid")
+        raise ValueError("Answer reviewer identities are invalid")
     for row in final:
         validate_compiled_resolution(row, manifest, readers, row["review_id"])
     report["gold_sha256"] = gold_receipt["gold_sha256"]
@@ -186,6 +200,9 @@ def main() -> None:
     report["blank_packet_sha256"] = sha256(packet_bytes).hexdigest()
     report["final_review_sha256"] = manifest["final_sha256"]
     report["reader_agreement_counts"] = manifest.get("agreement_counts")
+    report["answer_review_design"] = review_design(manifest)
+    report["gold_review_design"] = review_design(gold_receipt)
+    report["limitations"] = limitations(report["answer_review_design"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output), "accepted_items": len(gold),

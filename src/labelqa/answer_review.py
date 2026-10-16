@@ -1,4 +1,9 @@
-"""Validate two method-masked answer reviews and compile manual reconciliation."""
+"""Validate two method-masked answer reviews and compile manual reconciliation.
+
+With one disclosed ``llm_`` answer reviewer, the human file is frozen first with
+``answer_review receipt``; ``check`` and ``compile`` then require that receipt and the
+LLM provenance receipt, and the human expert alone signs every item.
+"""
 
 from __future__ import annotations
 
@@ -8,8 +13,9 @@ import json
 from pathlib import Path
 import re
 
+from .check_holdout_reviews import blind_receipt, verify_blind_receipts
 from .data import read_jsonl
-from .review_resolution import compiled_status, resolution
+from .review_resolution import compiled_status, is_llm, resolution
 from .score_qa import score_one
 
 
@@ -17,6 +23,17 @@ FIELDS = ("review_status", "answer_complete", "all_claims_supported",
           "citations_at_correct_location", "correct_version", "refusal_appropriate",
           "unsafe_unsupported_claim", "claim_judgments", "review_notes")
 JUDGMENT_FIELDS = FIELDS[:-1]
+ANSWER_BLIND_STATUS = "human_answer_review_frozen_before_any_llm_comparison"
+LLM_ANSWER_STATUS = "disclosed_llm_answer_review_not_human_review_not_gold"
+
+
+def answer_receipts(paths: dict[str, Path], packet: Path, human_receipt: Path | None,
+                    llm_provenance: Path | None) -> dict | None:
+    """Verify receipts only when one answer reviewer is a disclosed LLM."""
+    if not any(is_llm(reader) for reader in paths):
+        return None
+    return verify_blind_receipts(paths, packet, human_receipt, llm_provenance, "packet_sha256",
+                                 ANSWER_BLIND_STATUS, LLM_ANSWER_STATUS)
 VISIBLE_ID = re.compile(r"^\[P(\d{4})\]", re.M)
 
 
@@ -202,14 +219,37 @@ def main() -> None:
     final_parser = sub.add_parser("compile")
     for flag in ("packet", "reader-a", "reader-b", "adjudicated-queue", "output"):
         final_parser.add_argument("--" + flag, type=Path, required=True)
+    for each in (queue_parser, final_parser):
+        each.add_argument("--human-receipt", type=Path,
+                          help="Blind receipt of the human answer file when the other reader is an LLM")
+        each.add_argument("--llm-provenance", type=Path, help="Provenance receipt of the LLM answer review")
+    receipt_parser = sub.add_parser("receipt", help="Freeze one human answer file before any LLM comparison")
+    receipt_parser.add_argument("--packet", type=Path, required=True)
+    receipt_parser.add_argument("--reader", type=Path, required=True)
+    receipt_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists() or (args.mode == "compile" and args.output.with_suffix(".manifest.json").exists()):
         parser.error("Refusing to overwrite an answer-review artifact")
     packet = list(read_jsonl(args.packet))
     blank = packet_index(packet)
+    if args.mode == "receipt":
+        _, reviewer = index_review_file(args.reader, blank)
+        report = {"status": "single_answer_reader_self_check_passed_not_adjudication",
+                  "reader_ids": [reviewer], "items": len(blank)}
+        receipt = blind_receipt(report, args.reader, args.packet, "packet_sha256", ANSWER_BLIND_STATUS)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"receipt": str(args.output), "reader_sha256": receipt["reader_sha256"]}))
+        return
     a, id_a = index_review_file(args.reader_a, blank)
     b, id_b = index_review_file(args.reader_b, blank)
     expected = check(packet, a, b, (id_a, id_b))
+    receipts = answer_receipts({id_a: args.reader_a, id_b: args.reader_b}, args.packet,
+                               args.human_receipt, args.llm_provenance)
+    if receipts is not None:
+        expected["blind_receipts"] = receipts
+    expected["agreement_kind"] = ("expert_llm_agreement_not_inter_human_reliability"
+                                  if receipts is not None else "inter_reader_agreement")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.mode == "check":
         expected["source_sha256"] = {str(p): sha256(p.read_bytes()).hexdigest()
@@ -231,9 +271,12 @@ def main() -> None:
                 "agreement_counts": expected["agreement_counts"],
                 "resolution_mode": resolution_mode, "resolver_ids": resolver_ids,
                 "adjudicator_id": final[0]["adjudicator_id"],
+                "agreement_kind": expected["agreement_kind"],
                 "source_sha256": {str(p): sha256(p.read_bytes()).hexdigest() for p in
                                   (args.packet, args.reader_a, args.reader_b, args.adjudicated_queue)},
                 "final_sha256": sha256(args.output.read_bytes()).hexdigest()}
+    if receipts is not None:
+        manifest["blind_receipts"] = receipts
     args.output.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2) + "\n",
                                                             encoding="utf-8")
     print(json.dumps({"final": str(args.output), "items": len(final)}))
