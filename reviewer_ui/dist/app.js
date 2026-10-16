@@ -118,6 +118,47 @@
       && normalize(p[4]).includes(needle));
   }
 
+  // Re-find the reader's own quotes in the other version; drop any that no longer match verbatim.
+  function relocateSpan(span, sourceItem, targetItem) {
+    const sourceTitle = (sourceItem.sections.find(s => s.section_index === span.section_index) || {}).title;
+    const needle = normalize(span.quote);
+    const containing = targetItem.sections.filter(s => normalize(s.text).includes(needle));
+    const section = containing.find(s => s.section_index === span.section_index && s.title === sourceTitle)
+      || containing.find(s => s.title === sourceTitle) || containing[0];
+    if (!section) return null;
+    const moved = { section_index: section.section_index, quote: span.quote, source_kind: span.source_kind,
+                    table_index: null, row_index: null };
+    if (span.source_kind === "table_row") {
+      const rows = (locatorMatches(targetItem, section.section_index, span.quote) || []).filter(p => p[0] === 1);
+      const same = rows.find(p => p[2] === span.table_index && p[3] === span.row_index);
+      const chosen = same || (rows.length === 1 ? rows[0] : null);
+      if (!chosen) return null;
+      moved.table_index = chosen[2]; moved.row_index = chosen[3];
+    }
+    return spanIsMappable(targetItem, moved) ? moved : null;
+  }
+
+  function copyReview(sourceItem, targetItem) {
+    const source = reviewFor(sourceItem.qid);
+    let dropped = 0;
+    const claims = source.claims.map(claim => ({
+      text: claim.text,
+      evidence: claim.evidence.map(span => {
+        const moved = relocateSpan(span, sourceItem, targetItem);
+        if (!moved) dropped += 1;
+        return moved;
+      }).filter(Boolean),
+    }));
+    Object.assign(reviewFor(targetItem.qid), {
+      item_decision: source.item_decision, independent_answer: source.independent_answer,
+      answerable_from_version: source.answerable_from_version,
+      version_change_judgment: source.version_change_judgment,
+      clinical_significance: source.clinical_significance, notes: source.notes,
+      claims: source.answerable_from_version === true ? claims : [],
+    });
+    return dropped;
+  }
+
   function suggestLocator(card, item, selection) {
     const hint = card.querySelector("[data-role='locator-hint']");
     const matches = locatorMatches(item, selection.section_index, selection.quote);
@@ -279,6 +320,8 @@
         <a class="source-link" href="${escapeHtml(item.source_url)}" target="_blank" rel="noopener noreferrer">Mở đúng phiên bản nguồn DailyMed ↗</a>
       </header>
       <div class="review-form">
+        <div class="copy-row"><button class="small-button" type="button" data-action="copy-other">Sao chép câu trả lời của bạn từ phiên bản ${side === 0 ? "sau" : "trước"}</button>
+          <span class="help">Dùng khi phần liên quan giống nhau; sau đó phải đọc lại và kiểm tra trích dẫn ở phiên bản này.</span></div>
         <div class="field-grid">
           <div class="field"><label class="required" for="decision-${item.qid}">Quyết định câu hỏi</label>
             <select id="decision-${item.qid}" data-field="item_decision">${selectOptions([["accept", "Accept — dùng nguyên câu hỏi"], ["rewrite", "Rewrite — cần viết lại"], ["reject", "Reject — loại khỏi bộ test"]], review.item_decision, "Chọn quyết định")}</select>
@@ -550,6 +593,19 @@
     const qid = card.dataset.qid;
     const review = reviewFor(qid);
     const action = button.dataset.action;
+    if (action === "copy-other") {
+      const item = itemByQid.get(qid);
+      const other = pairs[currentPair].items.find(candidate => candidate.qid !== qid);
+      if (!reviewFor(other.qid).item_decision) return showToast("Phiên bản kia chưa có quyết định để sao chép.");
+      const hasWork = review.item_decision || review.independent_answer.trim() || review.claims.length;
+      if (hasWork && !window.confirm("Ghi đè phần đã điền ở phiên bản này bằng câu trả lời của phiên bản kia?")) return;
+      const dropped = copyReview(other, item);
+      activeClaim[qid] = null;
+      save(); rerenderCard(qid);
+      return showToast(dropped
+        ? `Đã sao chép. ${dropped} trích dẫn không còn nguyên văn ở phiên bản này; xem các claim báo thiếu bằng chứng.`
+        : "Đã sao chép. Đọc lại câu trả lời và kiểm tra trích dẫn ở phiên bản này trước khi sang cặp khác.");
+    }
     if (action === "add-claim") {
       review.claims.push({ text: "", evidence: [] });
       activeClaim[qid] = review.claims.length - 1;
