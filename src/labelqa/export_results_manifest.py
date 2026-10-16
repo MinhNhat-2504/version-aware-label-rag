@@ -20,6 +20,7 @@ REPORTS = (
     "results/set_aware_ablation.json",
     "results/joint_pair_ablation.json",
     "results/method_development_audit.json",
+    "results/holdout_design_sensitivity.json",
     "results/retrieval_error_analysis.json",
     "results/paired_dev_qa_manifest.json",
     "results/paired_dev_qa_comparison.json",
