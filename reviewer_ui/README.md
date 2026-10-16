@@ -23,6 +23,10 @@ Sau đó mở `http://localhost:8765`.
 5. Với bằng chứng từ bảng, chọn `table_row` và điền chỉ số bảng/hàng không âm. Snapshot hiện lưu văn bản section đã làm phẳng; dùng liên kết đúng phiên bản DailyMed trong giao diện để đối chiếu bố cục. Pipeline vẫn chỉ tải và lưu bản XML cục bộ sau khi gold được khóa.
 6. Nút **Xuất JSONL hoàn chỉnh** chỉ tạo file khi mọi mục trong gói đều hợp lệ. Nút **Tải bản nháp** dùng để sao lưu giữa chừng và có thể nhập lại.
 
+Khi thư mục `results/pinned_xml_holdout_review/` có XML đã ghim (tạo bằng `python -m labelqa.fetch_review_xml`), gói dữ liệu kèm các đoạn văn xuôi và hàng bảng do parser tách. Khi bôi đen, giao diện tự chọn loại nguồn, điền chỉ số bảng/hàng nếu đoạn chỉ khớp một hàng, và từ chối trích dẫn không nằm trọn trong một đoạn mà pipeline sau gold có thể ánh xạ.
+
+Tự kiểm tra một phiếu đã xuất: `python -m labelqa.check_holdout_reviews --reader-a <file>`.
+
 Một file reviewer chưa phải gold. Cần hai reviewer độc lập, sau đó hòa giải bằng đồng thuận theo pipeline hiện tại.
 
 ## Tạo lại gói dữ liệu
