@@ -350,7 +350,7 @@
       <section class="source-zone">
         <div class="source-tools">
           <div class="section-heading"><h4>Nguồn đóng băng · ${item.sections.length} sections</h4><span class="help">Không xếp hạng</span></div>
-          <div class="source-tools-row"><input class="source-search" type="search" data-action="search" placeholder="Lọc theo tiêu đề hoặc nội dung section" value="${escapeHtml(sourceView[item.qid]?.query || "")}"><button class="small-button" type="button" data-action="clear-search">Xóa lọc</button></div>
+          <div class="source-tools-row"><input class="source-search" type="search" data-action="search" placeholder="Gõ 1–2 từ tiếng Anh, ví dụ: indicat, dosage, pregnan" value="${escapeHtml(sourceView[item.qid]?.query || "")}"><button class="small-button" type="button" data-action="clear-search">Xóa lọc</button></div>
           <p class="source-count" data-role="source-count"></p>
           <p class="table-notice">Văn bản bảng trong snapshot đã được làm phẳng. Bôi đen trong một ô để giao diện tìm đúng hàng; nếu hàng có ô gộp hoặc nhiều tầng tiêu đề, ghi chú lại để người hòa giải kiểm tra.</p>
         </div>
@@ -373,9 +373,13 @@
   }
 
   function matchingSections(item) {
-    const query = normalize(sourceView[item.qid]?.query || "");
-    if (!query) return item.sections;
-    return item.sections.filter(section => normalize(`${section.title} ${section.code} ${section.text}`).includes(query));
+    // Every typed word must occur somewhere in the section; source order is kept and nothing is ranked.
+    const words = normalize(sourceView[item.qid]?.query || "").split(" ").filter(Boolean);
+    if (!words.length) return item.sections;
+    return item.sections.filter(section => {
+      const haystack = normalize(`${section.title} ${section.code} ${section.text}`);
+      return words.every(word => haystack.includes(word));
+    });
   }
 
   function renderSections(item) {
@@ -388,7 +392,7 @@
     card.querySelector("[data-role='sections']").innerHTML = shown.map(section => `<details class="source-section" data-section="${section.section_index}">
       <summary>§${section.section_index} · ${escapeHtml(section.title)} <span class="section-code">${escapeHtml(section.code || "")}</span></summary>
       <p class="section-text">${escapeHtml(section.text)}</p>
-    </details>`).join("") || `<p class="empty-state">Không có section chứa chuỗi tìm kiếm này.</p>`;
+    </details>`).join("") || `<p class="empty-state">Không có section chứa đủ các từ này. Nhãn viết bằng tiếng Anh: hãy gõ 1–2 từ tiếng Anh lấy từ câu hỏi, hoặc bớt từ.</p>`;
     const more = card.querySelector("[data-action='load-more']");
     more.hidden = shown.length >= matched.length;
     more.textContent = `Xem thêm (${matched.length - shown.length} còn lại)`;
