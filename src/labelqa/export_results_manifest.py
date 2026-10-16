@@ -14,6 +14,7 @@ REPORTS = (
     "results/learned_selector_validation.json",
     "results/dense_validation.json",
     "results/retrieval_gate_validation.json",
+    "results/crossfit_retrieval_gate.json",
     "results/clause_coverage_ablation.json",
     "results/candidate_pool_diagnostics.json",
     "results/deep_pool_ablation.json",
