@@ -44,6 +44,11 @@ class HoldoutSensitivityPlanTests(unittest.TestCase):
         self.assertGreater(larger_sample, small)
         self.assertGreater(larger_effect, small)
 
+    def test_power_is_finite_for_large_planning_sizes(self):
+        power = optimistic_exact_power(2393, 0.0877, 0.6327)
+        self.assertGreater(power, optimistic_exact_power(559, 0.0877, 0.6327))
+        self.assertLessEqual(power, 1.0)
+
     def test_exact_calibration_reaches_target(self):
         n, power = exact_calibrated_items(0.30, 0.75, 0.80)
         self.assertGreaterEqual(power, 0.80)

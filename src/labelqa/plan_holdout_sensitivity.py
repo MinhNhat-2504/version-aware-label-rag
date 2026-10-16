@@ -22,8 +22,12 @@ ALPHA = 0.05
 
 
 def binomial_probability(n: int, successes: int, probability: float) -> float:
-    return (math.comb(n, successes) * probability ** successes
-            * (1.0 - probability) ** (n - successes))
+    """Binomial mass in log space, so large planning sizes do not overflow."""
+    if probability in (0.0, 1.0):
+        return float(successes == (n if probability == 1.0 else 0))
+    log_mass = (math.lgamma(n + 1) - math.lgamma(successes + 1) - math.lgamma(n - successes + 1)
+                + successes * math.log(probability) + (n - successes) * math.log1p(-probability))
+    return math.exp(log_mass)
 
 
 @lru_cache(maxsize=None)
