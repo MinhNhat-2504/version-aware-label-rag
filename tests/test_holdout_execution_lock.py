@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from labelqa.lock_holdout_execution import lock_payload, require_fresh_run_paths, verify_lock
 import labelqa.lock_holdout_execution as lock_module
-from labelqa.run_local import validate_locked_run
+from labelqa.run_local import context_window_tight, saved_rows, validate_locked_run
 
 
 class HoldoutExecutionLockTests(unittest.TestCase):
@@ -67,6 +67,31 @@ class HoldoutExecutionLockTests(unittest.TestCase):
         with patch.object(Path, "exists", return_value=True):
             with self.assertRaisesRegex(ValueError, "execution lock"):
                 validate_locked_run("model", 20261016, 180, prompt, response, "bm25", locked)
+
+    def test_resume_is_explicit_and_never_repeats_a_saved_call(self):
+        locked = {"answer_model": "model", "decoding_options": {"seed": 20261016},
+                  "request_timeout_seconds": 180,
+                  "prompt_paths": {"bm25": "results/holdout_bm25_prompts.jsonl"},
+                  "response_paths": {"bm25": "results/holdout_bm25_responses.jsonl"}}
+        prompt = Path(locked["prompt_paths"]["bm25"])
+        response = Path(locked["response_paths"]["bm25"])
+        with patch.object(Path, "exists", return_value=True):
+            validate_locked_run("model", 20261016, 180, prompt, response, "bm25", locked, resume=True)
+        saved = "\n".join(json.dumps(row) for row in (
+            {"qid": "q1", "parsed_response": {}}, {"qid": "q2", "error": "timed out"}))
+        with (patch.object(Path, "exists", return_value=True),
+              patch.object(Path, "read_text", return_value=saved)):
+            # A locked run keeps the saved error; an unlocked pilot retries it.
+            self.assertEqual(set(saved_rows(response, True, {"q1": "h", "q2": "h", "q3": "h"})), {"q1", "q2"})
+            self.assertEqual(set(saved_rows(response, False, {})), {"q1"})
+            with self.assertRaisesRegex(ValueError, "unknown or repeated"):
+                saved_rows(response, True, {"q1": "h"})
+
+    def test_context_window_flag(self):
+        options = {"num_ctx": 8192, "num_predict": 512}
+        self.assertFalse(context_window_tight(7000, options))
+        self.assertTrue(context_window_tight(7900, options))
+        self.assertFalse(context_window_tight(None, options))
 
     def test_lock_requires_fresh_declared_run_paths(self):
         fresh = {"prompt_paths": {"bm25": "results/.never_created_lock_prompt.jsonl"},

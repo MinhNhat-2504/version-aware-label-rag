@@ -1,4 +1,10 @@
-"""Run frozen prompt JSONL against an installed local Ollama model."""
+"""Run frozen prompt JSONL against an installed local Ollama model.
+
+A locked holdout run makes exactly one call per question and method. If the process
+dies, ``--resume`` continues only the questions without a saved row: every saved row,
+including a saved error, must match the lock and is never called again. Each session
+is appended to ``<output>.sessions.jsonl``.
+"""
 
 from __future__ import annotations
 
@@ -36,13 +42,40 @@ def model_digest(model: str) -> str:
 
 
 def validate_locked_run(model: str, seed: int | None, timeout: int,
-                        input_path: Path, output_path: Path, method: str, locked: dict) -> None:
+                        input_path: Path, output_path: Path, method: str, locked: dict,
+                        resume: bool = False) -> None:
     if (model != locked["answer_model"] or seed != locked["decoding_options"]["seed"]
             or timeout != locked["request_timeout_seconds"]
             or input_path != portable_path(locked["prompt_paths"][method])
             or output_path != portable_path(locked["response_paths"][method])
-            or output_path.exists()):
-        raise ValueError("Holdout model, seed, timeout, paths or existing output differ from execution lock")
+            or (output_path.exists() and not resume)):
+        raise ValueError("Holdout model, seed, timeout, paths or existing output differ from execution lock"
+                         " (use --resume only to continue an interrupted locked run)")
+
+
+def context_window_tight(prompt_tokens, options: dict) -> bool:
+    """True when the prompt leaves less than the output budget inside num_ctx (possible truncation)."""
+    return (isinstance(prompt_tokens, int)
+            and prompt_tokens + options.get("num_predict", 0) > options.get("num_ctx", 0))
+
+
+def saved_rows(path: Path, locked: bool, prompt_hashes: dict[str, str]) -> dict[str, dict]:
+    """Rows to keep; a locked run keeps saved errors so no question is called twice."""
+    finished: dict[str, dict] = {}
+    if not path.exists():
+        return finished
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        previous = json.loads(line)
+        qid = previous.get("qid")
+        if locked:
+            if qid not in prompt_hashes or qid in finished:
+                raise ValueError(f"Saved locked response is unknown or repeated: {qid}")
+            finished[qid] = previous
+        elif not previous.get("error"):
+            finished[qid] = previous
+    return finished
 
 
 def main() -> None:
@@ -55,6 +88,8 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--gold", type=Path, default=Path("data/holdout/version_gold_adjudicated.jsonl"))
     parser.add_argument("--execution-lock", type=Path, default=Path("paper/HOLDOUT_EXECUTION_LOCK.json"))
+    parser.add_argument("--resume", action="store_true",
+                        help="Continue an interrupted locked holdout run without repeating any saved call")
     args = parser.parse_args()
     holdout_receipt = args.input.with_suffix(".manifest.json")
     locked = None
@@ -70,7 +105,7 @@ def main() -> None:
             if method not in METHODS:
                 raise ValueError("Unknown holdout method in prompt receipt")
             validate_locked_run(args.model, args.seed, args.timeout, args.input, args.output,
-                                method, locked)
+                                method, locked, args.resume)
             expected_selector = model_weights()[1] if method == "learned_cover" else None
             gold_manifest_hash = sha256(args.gold.with_suffix(".manifest.json").read_bytes()).hexdigest()
             prompts = read_prompts(args.input, method, gold_receipt["gold_sha256"],
@@ -98,18 +133,22 @@ def main() -> None:
     if locked is not None and digest != locked["answer_model_digest"]:
         raise ValueError("Installed answering model digest differs from execution lock")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    finished = {}
-    if args.output.exists():
-        for line in args.output.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                previous = json.loads(line)
-                if not previous.get("error"):
-                    finished[previous["qid"]] = previous
-    completed = errors = 0
-    with args.input.open("r", encoding="utf-8") as source, args.output.open("a", encoding="utf-8") as sink:
-        for line in source:
-            item = json.loads(line)
-            prompt_hash = sha256((item["system_prompt"] + item["user_prompt"]).encode()).hexdigest()
+    items = [json.loads(line) for line in args.input.read_text(encoding="utf-8").splitlines() if line.strip()]
+    prompt_hashes = {item["qid"]: sha256((item["system_prompt"] + item["user_prompt"]).encode()).hexdigest()
+                     for item in items}
+    finished = saved_rows(args.output, locked is not None, prompt_hashes)
+    if locked is not None:
+        if any(row.get("execution_lock_sha256") != lock_hash for row in finished.values()):
+            raise ValueError("Saved holdout responses were made under another execution lock")
+        session = {"started_utc": datetime.now(timezone.utc).isoformat(), "resume": bool(finished),
+                   "saved_rows": len(finished), "saved_errors": sum(bool(r.get("error")) for r in finished.values()),
+                   "execution_lock_sha256": lock_hash, "model_digest": digest}
+        with args.output.with_suffix(".sessions.jsonl").open("a", encoding="utf-8", newline="\n") as log:
+            log.write(json.dumps(session) + "\n")
+    completed = errors = tight = 0
+    with args.output.open("a", encoding="utf-8") as sink:
+        for item in items:
+            prompt_hash = prompt_hashes[item["qid"]]
             options = {"temperature": 0, "num_ctx": 8192, "num_predict": 512,
                        **({"seed": args.seed} if args.seed is not None else {})}
             if item["qid"] in finished:
@@ -147,6 +186,8 @@ def main() -> None:
                 row["prompt_eval_count"] = response.get("prompt_eval_count")
                 row["eval_count"] = response.get("eval_count")
                 row["total_duration_ns"] = response.get("total_duration")
+                row["context_window_tight"] = context_window_tight(row["prompt_eval_count"], options)
+                tight += row["context_window_tight"]
                 completed += 1
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 row["error"] = str(exc)
@@ -154,7 +195,8 @@ def main() -> None:
             sink.write(json.dumps(row, ensure_ascii=False) + "\n")
             sink.flush()
             print(json.dumps({"qid": item["qid"], "completed": completed, "errors": errors}), flush=True)
-    print(json.dumps({"output": str(args.output), "completed": completed, "errors": errors}))
+    print(json.dumps({"output": str(args.output), "completed": completed, "errors": errors,
+                      "context_window_tight": tight, "kept_saved_rows": len(finished)}))
 
 
 if __name__ == "__main__":

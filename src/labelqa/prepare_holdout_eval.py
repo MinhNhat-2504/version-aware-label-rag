@@ -176,7 +176,9 @@ def main() -> None:
                "gold_sha256": manifest["gold_sha256"], "gold_manifest_sha256": sha256(args.gold.with_suffix(".manifest.json").read_bytes()).hexdigest(),
                "prompts_sha256": sha256(args.output.read_bytes()).hexdigest(), "n": len(prompts),
                "execution_lock_sha256": lock_hash,
-               "model_sha256": prompts[0]["selector_model_sha256"] if prompts else None}
+               "model_sha256": prompts[0]["selector_model_sha256"] if prompts else None,
+               "max_prompt_characters": max((len(row["system_prompt"]) + len(row["user_prompt"])
+                                             for row in prompts), default=0)}
     args.output.with_suffix(".manifest.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output), "n": len(prompts), "method": args.method}))
 
