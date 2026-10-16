@@ -74,10 +74,11 @@ def build_payload(root: Path = ROOT, packet: Path = DEFAULT_PACKET) -> dict:
         if len(pair["items"]) != 2:
             raise ValueError(f"Expected exactly two versions for {pair['pair_id']}")
 
-    inputs = {str(packet): file_sha256(packet_path)}
+    # POSIX keys keep the bundle identical across platforms; app.js looks up the packet hash by them.
+    inputs = {portable_path(packet).as_posix(): file_sha256(packet_path)}
     for relative_path in snapshot_paths:
         path = relative_path if relative_path.is_absolute() else root / relative_path
-        inputs[str(relative_path)] = file_sha256(path)
+        inputs[relative_path.as_posix()] = file_sha256(path)
     return {
         "schema_version": "1.0",
         "dataset": "sealed_version_holdout_human_review",

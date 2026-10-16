@@ -62,6 +62,13 @@ class ReviewerInterfaceTests(unittest.TestCase):
         forbidden = {"model_answer", "retrieved_passages", "prediction", "gold_answer"}
         self.assertFalse(forbidden & set(json.dumps(payload).split('"')))
 
+    def test_input_hash_keys_match_browser_lookup_on_every_platform(self):
+        payload = build_payload(self.root)
+        # reviewer_ui/dist/app.js binds autosave and draft import to this exact key.
+        self.assertIn("data/review/version_holdout_reader_a_blank.jsonl", payload["inputs_sha256"])
+        self.assertIn("data/snapshots/version_holdout_sources.jsonl", payload["inputs_sha256"])
+        self.assertFalse(any("\\" in key for key in payload["inputs_sha256"]))
+
     def test_bundle_is_a_browser_script_with_roundtrippable_json(self):
         payload = build_payload(self.root)
         output = self.root / "review-data.js"
