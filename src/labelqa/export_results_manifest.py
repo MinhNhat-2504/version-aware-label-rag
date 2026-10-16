@@ -56,7 +56,7 @@ REPORTS = (
     "results/synthetic_claim_judge_pilot.json",
     "results/holdout_source_preflight.json",
     "results/holdout_source_preflight_expanded.json",
-    "results/holdout_pipeline_rehearsal_v3.json",
+    "results/holdout_pipeline_rehearsal_v4.json",
     "results/equivalence_adjudicated_pilot_coverage.json",
 )
 SOURCES = (

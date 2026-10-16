@@ -24,6 +24,10 @@ SOURCE_REQUIRED_FILES = (
     Path("reviewer_ui/dist/index.html"),
     Path("reviewer_ui/dist/styles.css"),
     Path("reviewer_ui/dist/app.js"),
+    Path("answer_review_ui/dist/index.html"),
+    Path("answer_review_ui/dist/styles.css"),
+    Path("answer_review_ui/dist/logic.js"),
+    Path("answer_review_ui/dist/app.js"),
 )
 ACTIVE_CANDIDATES = Path("data/holdout/version_question_candidates_expanded.jsonl")
 FULL_ARTIFACT_FILES = (
@@ -34,7 +38,7 @@ FULL_ARTIFACT_FILES = (
     ACTIVE_CANDIDATES,
 )
 SOURCE_FORBIDDEN_PREFIXES = ("data/", "paper/", "results/", "private_review/")
-SOURCE_FORBIDDEN_PATHS = {"reviewer_ui/dist/review-data.js"}
+SOURCE_FORBIDDEN_PATHS = {"reviewer_ui/dist/review-data.js", "answer_review_ui/dist/answer-review-data.js"}
 SOURCE_FORBIDDEN_SUFFIXES = (".pdf", ".docx")
 
 

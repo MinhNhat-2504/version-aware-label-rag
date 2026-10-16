@@ -8,3 +8,4 @@ results/
 private_review/
 reviewer_ui/dist/review-data.js
 *.pdf
+answer_review_ui/dist/answer-review-data.js

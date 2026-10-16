@@ -21,6 +21,9 @@ METHODS = ("bm25", "learned_cover", "ontology_cover")
 CODE_FILES = (
     "src/labelqa/answer_review.py", "src/labelqa/check_holdout_reviews.py",
     "src/labelqa/compile_holdout_gold.py", "src/labelqa/data.py",
+    "src/labelqa/build_llm_answer_review.py", "src/labelqa/expert_resolution.py",
+    "src/labelqa/export_answer_review_interface.py", "src/labelqa/review_agreement.py",
+    "answer_review_ui/dist/app.js", "answer_review_ui/dist/logic.js",
     "src/labelqa/holdout_reporting.py", "src/labelqa/learned_retrieval.py",
     "src/labelqa/prepare_blinded_answer_review.py", "src/labelqa/prepare_holdout_eval.py",
     "src/labelqa/prompts.py", "src/labelqa/recent.py", "src/labelqa/retrieval.py",

@@ -75,6 +75,8 @@ Then open `reviewer_ui/dist/index.html`. See `reviewer_ui/README.md` for the ann
 
 The active review design pairs one disclosed LLM annotation (an `llm_` reviewer ID) with one human expert. The expert's file is frozen by a blind receipt before any comparison (`labelqa.check_holdout_reviews --receipt`, `labelqa.answer_review receipt`), and the expert alone signs every final item through a spreadsheet (`labelqa.expert_resolution sheet` / `sign`). An LLM ID can never sign. `python -m labelqa.rehearse_holdout_pipeline --design llm_expert --root <new-dir>` rehearses the whole post-review sequence on development labels.
 
+The method-blind answer review has its own offline interface in `answer_review_ui/dist/`; its generated `answer-review-data.js` (model outputs on the holdout) is excluded from Git. See `answer_review_ui/README.md`.
+
 ## Data and artifacts
 
 The pipeline expects project-local `data/`, `results/` and `paper/` directories for full experiments. They are excluded from the source repository. Frozen inputs and outputs should be transferred through a controlled research archive with their SHA-256 manifests.

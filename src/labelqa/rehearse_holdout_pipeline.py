@@ -341,6 +341,8 @@ def rehearse(root: Path, model: str, design: str = "llm_expert") -> dict:
             "--output", "results/holdout_retrieval_summary.json")
     packet, key = "review/answer_packet.jsonl", "private/answer_key.json"
     run.run("blinded_answer_packet", "prepare_blinded_answer_review", "--output", packet, "--private-map", key)
+    run.run("answer_review_interface_bundle", "export_answer_review_interface", "--packet", packet,
+            "--root", ".", "--output", "review/answer-review-data.js")
     gold = {row["qid"]: row["answerable"] for row in read_jsonl(root / "data/holdout/version_gold_adjudicated.jsonl")}
     rows = list(read_jsonl(root / packet))
     answer_files = [f"review/{reader}_answers.jsonl" for reader in readers]

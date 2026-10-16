@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LabelQA · Chấm câu trả lời</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">LABELQA · METHOD-BLIND ANSWER REVIEW</p>
+      <h1>Phiếu chấm câu trả lời của mô hình</h1>
+    </div>
+    <div class="seal"><span aria-hidden="true">●</span> Đã che tên phương pháp · không có đáp án chuẩn</div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Điều hướng phiếu chấm">
+      <section class="identity-card">
+        <label for="reviewer-id">Mã chuyên gia</label>
+        <input id="reviewer-id" autocomplete="off" placeholder="Ví dụ: expert_01">
+        <p>Dùng đúng mã của giai đoạn thẩm định nguồn. Không nhập tên hay email.</p>
+      </section>
+
+      <section class="progress-card" aria-live="polite">
+        <div class="progress-label"><strong id="progress-text">0 / 0</strong><span>mục hợp lệ</span></div>
+        <div class="progress-track"><span id="progress-bar"></span></div>
+      </section>
+
+      <div class="nav-heading">
+        <span id="item-count">Câu trả lời</span>
+        <label class="filter-toggle"><input id="only-open" type="checkbox"> Chỉ mục chưa xong</label>
+      </div>
+      <ol id="item-list" class="item-list"></ol>
+
+      <section class="file-actions">
+        <button id="export-jsonl" class="primary-button" type="button">Xuất JSONL hoàn chỉnh</button>
+        <button id="backup-json" class="secondary-button" type="button">Tải bản nháp</button>
+        <label class="secondary-button file-label" for="import-file">Nhập bản đã lưu</label>
+        <input id="import-file" class="visually-hidden" type="file" accept=".json,.jsonl,application/json">
+        <button id="clear-local" class="danger-button" type="button">Xóa bản lưu trên máy</button>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="intro-card">
+        <div>
+          <p class="step-label" id="item-position">Mục 1 / 1</p>
+          <h2 id="drug-title"></h2>
+          <p class="question" id="question"></p>
+          <p class="meta" id="item-meta"></p>
+        </div>
+        <div class="pair-controls">
+          <button id="previous-item" class="icon-button" type="button" aria-label="Mục trước">←</button>
+          <button id="next-item" class="icon-button" type="button" aria-label="Mục sau">→</button>
+        </div>
+      </section>
+
+      <section class="method-note">
+        <strong>Cách chấm:</strong> mỗi mục là một câu trả lời của một phương pháp chưa biết tên. Kiểm từng claim với đoạn mà nó trích; dùng toàn văn nhãn bên dưới để xét câu trả lời có bỏ sót ý không và việc từ chối có phù hợp không. Đừng đoán phương pháp.
+      </section>
+
+      <div class="review-grid">
+        <section class="panel" aria-labelledby="answer-heading">
+          <h3 id="answer-heading">Câu trả lời của mô hình</h3>
+          <div id="model-answer"></div>
+          <h3>Bằng chứng mô hình đã nhận</h3>
+          <div id="visible-evidence" class="evidence-list"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="form-heading">
+          <h3 id="form-heading">Phiếu chấm</h3>
+          <form id="review-form" autocomplete="off"></form>
+          <ul id="item-errors" class="item-errors" aria-live="polite"></ul>
+        </section>
+      </div>
+
+      <details class="panel label-panel">
+        <summary>Toàn văn nhãn đúng phiên bản (để xét bỏ sót và từ chối)</summary>
+        <input id="section-filter" class="section-filter" type="search" placeholder="Lọc section theo chữ (mọi từ phải có mặt)">
+        <div id="label-sections"></div>
+      </details>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="validation-dialog">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">KIỂM TRA PHIẾU</p><h2>Chưa thể xuất JSONL hoàn chỉnh</h2></div>
+        <button class="icon-button" value="close" aria-label="Đóng">×</button>
+      </div>
+      <p id="validation-summary"></p>
+      <ol id="validation-errors" class="validation-errors"></ol>
+      <button class="primary-button" value="close">Quay lại sửa</button>
+    </form>
+  </dialog>
+
+  <script src="answer-review-data.js"></script>
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
