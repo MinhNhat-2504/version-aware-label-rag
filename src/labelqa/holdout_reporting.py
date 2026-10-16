@@ -11,10 +11,16 @@ COHORTS = {
     "version_holdout_sources.jsonl": "consecutive_pairs",
     "version_change_cohort_sources.jsonl": "text_change_enriched",
 }
+# The expansion uses the same two sampling rules, so its arms join the same strata.
+SOURCE_STRATA = {
+    **COHORTS,
+    "version_expansion_consecutive_sources.jsonl": "consecutive_pairs",
+    "version_expansion_change_sources.jsonl": "text_change_enriched",
+}
 
 
 def cohort_for(source_snapshot: str) -> str:
-    cohort = COHORTS.get(portable_path(source_snapshot).name)
+    cohort = SOURCE_STRATA.get(portable_path(source_snapshot).name)
     if cohort is None:
         raise ValueError(f"Unknown frozen source cohort: {source_snapshot}")
     return cohort

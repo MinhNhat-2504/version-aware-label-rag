@@ -93,7 +93,7 @@ def compile_gold(expected: dict, edited: dict, candidates: dict[str, dict],
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidates", type=Path, default=Path("data/holdout/version_question_candidates.jsonl"))
+    parser.add_argument("--candidates", type=Path, default=Path("data/holdout/version_question_candidates_expanded.jsonl"))
     parser.add_argument("--reader-a", type=Path, required=True)
     parser.add_argument("--reader-b", type=Path, required=True)
     parser.add_argument("--adjudicated-queue", type=Path, required=True)

@@ -22,6 +22,7 @@ REPORTS = (
     "results/joint_pair_ablation.json",
     "results/method_development_audit.json",
     "results/holdout_design_sensitivity.json",
+    "results/holdout_design_sensitivity_expanded.json",
     "results/retrieval_error_analysis.json",
     "results/paired_dev_qa_manifest.json",
     "results/paired_dev_qa_comparison.json",
@@ -47,6 +48,7 @@ REPORTS = (
     "results/version_table_span_aligned_comparison.json",
     "results/synthetic_claim_judge_pilot.json",
     "results/holdout_source_preflight.json",
+    "results/holdout_source_preflight_expanded.json",
     "results/equivalence_adjudicated_pilot_coverage.json",
 )
 SOURCES = (
@@ -55,6 +57,9 @@ SOURCES = (
     "data/holdout/version_question_candidates.jsonl",
     "data/holdout/version_test_manifest.json",
     "data/holdout/version_change_cohort_manifest.json",
+    "data/holdout/version_expansion_manifest.json",
+    "data/holdout/version_question_candidates_expanded.jsonl",
+    "data/holdout/version_question_candidates_expanded.manifest.json",
     "results/equivalence_review_validation.jsonl",
     "data/review/equivalence_validation_manifest.json",
     "data/review/equivalence_validation_reader_a_blank.jsonl",

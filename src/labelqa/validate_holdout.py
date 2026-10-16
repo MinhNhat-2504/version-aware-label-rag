@@ -11,10 +11,23 @@ from .build_version_holdout import PRIOR_SNAPSHOTS
 from .data import load_questions, portable_path, read_jsonl
 
 
+EXPANSION_MANIFEST = Path("data/holdout/version_expansion_manifest.json")
 COHORTS = (
     (Path("data/snapshots/version_holdout_sources.jsonl"), Path("data/holdout/version_test_manifest.json")),
     (Path("data/snapshots/version_change_cohort_sources.jsonl"), Path("data/holdout/version_change_cohort_manifest.json")),
+    (Path("data/snapshots/version_expansion_consecutive_sources.jsonl"), EXPANSION_MANIFEST),
+    (Path("data/snapshots/version_expansion_change_sources.jsonl"), EXPANSION_MANIFEST),
 )
+
+
+def frozen_receipt(manifest: dict, source: Path) -> tuple[str, int]:
+    """Return the frozen checksum and pair count for one source file."""
+    if "sources" in manifest:  # The expansion manifest records both of its arms.
+        receipt = manifest["sources"].get(source.as_posix())
+        if receipt is None:
+            raise ValueError(f"Source is absent from its frozen manifest: {source}")
+        return receipt["sha256"], receipt["selected_pairs"]
+    return manifest["sources_sha256"], manifest["selected_pairs"]
 
 
 def validate_candidate_pairing(candidates: list[dict], source_by_set_id: dict[str, Path]) -> None:
@@ -46,11 +59,13 @@ def validate_candidate_pairing(candidates: list[dict], source_by_set_id: dict[st
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidates", type=Path,
-                        default=Path("data/holdout/version_question_candidates.jsonl"))
+                        default=Path("data/holdout/version_question_candidates_expanded.jsonl"))
     parser.add_argument("--reader-a-blank", type=Path,
-                        default=Path("data/review/version_holdout_reader_a_blank.jsonl"))
+                        default=Path("data/review/version_holdout_expanded_reader_a_blank.jsonl"))
     parser.add_argument("--reader-b-blank", type=Path,
-                        default=Path("data/review/version_holdout_reader_b_blank.jsonl"))
+                        default=Path("data/review/version_holdout_expanded_reader_b_blank.jsonl"))
+    parser.add_argument("--original-only", action="store_true",
+                        help="Validate the superseded 12-pair design and its frozen 24-item files")
     parser.add_argument("--output", type=Path,
                         help="Optional metadata-only preflight report; refuses to overwrite")
     args = parser.parse_args()
@@ -59,14 +74,20 @@ def main() -> None:
     prior = {q.set_id for q in load_questions(Path("data/upstream/FDARxBench/data/qa/qa.jsonl"))}
     for path in PRIOR_SNAPSHOTS:
         prior.update(row["set_id"] for row in read_jsonl(path))
+    if args.original_only:
+        args.candidates = Path("data/holdout/version_question_candidates.jsonl")
+        args.reader_a_blank = Path("data/review/version_holdout_reader_a_blank.jsonl")
+        args.reader_b_blank = Path("data/review/version_holdout_reader_b_blank.jsonl")
+    cohorts = COHORTS[:2] if args.original_only else COHORTS
     pairs = []
     source_by_set_id = {}
-    for source, manifest_path in COHORTS:
+    for source, manifest_path in cohorts:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if sha256(source.read_bytes()).hexdigest() != manifest["sources_sha256"]:
+        expected_sha, expected_pairs = frozen_receipt(manifest, source)
+        if sha256(source.read_bytes()).hexdigest() != expected_sha:
             raise ValueError(f"Frozen source checksum mismatch: {source}")
         rows = list(read_jsonl(source))
-        if len(rows) != manifest["selected_pairs"]:
+        if len(rows) != expected_pairs:
             raise ValueError(f"Frozen source count mismatch: {source}")
         pairs.extend(rows)
         source_by_set_id.update({row["set_id"]: source for row in rows})
@@ -106,13 +127,13 @@ def main() -> None:
     report = {"status": "source_metadata_preflight_only_no_model_or_human_gold",
               "pairs": len(pairs), "versions": len(by_version),
               "candidate_questions": len(candidates),
-              "cohorts": {str(source): len([pair for pair in pairs
-                                            if source_by_set_id[pair["set_id"]] == source])
-                          for source, _ in COHORTS},
+              "cohorts": {source.as_posix(): len([pair for pair in pairs
+                                                  if source_by_set_id[pair["set_id"]] == source])
+                          for source, _ in cohorts},
               "paired_question_wording_verified": True,
               "disjoint_from_benchmark_and_prior_pilots": True,
-              "source_snapshot_sha256": {str(source): sha256(source.read_bytes()).hexdigest()
-                                         for source, _ in COHORTS},
+              "source_snapshot_sha256": {source.as_posix(): sha256(source.read_bytes()).hexdigest()
+                                         for source, _ in cohorts},
               "candidate_sha256": sha256(args.candidates.read_bytes()).hexdigest(),
               "blank_review_packet_sha256": {str(path): sha256(path.read_bytes()).hexdigest()
                                               for path in review_paths},

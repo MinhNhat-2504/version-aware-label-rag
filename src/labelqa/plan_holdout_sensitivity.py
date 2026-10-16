@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from hashlib import sha256
 from functools import lru_cache
 import json
@@ -10,9 +11,12 @@ from pathlib import Path
 from statistics import NormalDist
 from typing import Any
 
+from .holdout_reporting import cohort_for
+
 
 PREFLIGHT = Path("results/holdout_source_preflight.json")
 ANALYSIS_PLAN = Path("paper/ANALYSIS_PLAN.md")
+ERROR_ANALYSIS = Path("results/retrieval_error_analysis.json")
 OUTPUT = Path("results/holdout_design_sensitivity.json")
 ALPHA = 0.05
 
@@ -104,12 +108,52 @@ def power_grid(n: int) -> list[dict[str, Any]]:
     return rows
 
 
-def build_report(preflight: dict[str, Any], analysis_plan_bytes: bytes) -> dict[str, Any]:
+def stratum_pairs(preflight: dict[str, Any]) -> dict[str, int]:
+    """Count frozen label pairs per prespecified sampling stratum."""
+    counts: dict[str, int] = {}
+    for source, pairs in preflight.get("cohorts", {}).items():
+        stratum = cohort_for(source)
+        counts[stratum] = counts.get(stratum, 0) + pairs
+    if sum(counts.values()) != preflight.get("pairs"):
+        raise ValueError("Cohort pair counts do not sum to the frozen design")
+    return counts
+
+
+def empirical_reference(error_analysis: dict[str, Any], items: int) -> dict[str, Any]:
+    """Plan from the observed validation discordance of learned_cover versus BM25."""
+    counts = error_analysis["counts"]
+    wins = counts["learned_cover_win_over_bm25"]
+    losses = counts["learned_cover_loss_to_bm25"]
+    n = error_analysis["questions"]
+    discordance = (wins + losses) / n
+    share = wins / (wins + losses)
+    return {
+        "role": ("Observed effect on the inspected validation retrieval proxy; descriptive planning "
+                 "input only, with the same optimistic item-independence assumption."),
+        "validation_questions": n,
+        "learned_only_successes": wins,
+        "bm25_only_successes": losses,
+        "discordance_rate": round(discordance, 4),
+        "candidate_share_among_discordances": round(share, 4),
+        "implied_absolute_difference": round(discordance * (2 * share - 1), 4),
+        "approximate_independent_items_for_80_percent_power":
+            approximate_required_items(discordance, share, 0.80),
+        "approximate_independent_items_for_90_percent_power":
+            approximate_required_items(discordance, share, 0.90),
+        "optimistic_power_at_current_items": round(
+            optimistic_exact_power(items, discordance, share), 4),
+    }
+
+
+def build_report(preflight: dict[str, Any], analysis_plan_bytes: bytes,
+                 error_analysis: dict[str, Any] | None = None) -> dict[str, Any]:
     pairs = preflight.get("pairs")
     versions = preflight.get("versions")
     questions = preflight.get("candidate_questions")
-    if (pairs, versions, questions) != (12, 24, 24):
-        raise ValueError("Frozen holdout size differs from the declared 12-pair design")
+    if (not isinstance(pairs, int) or pairs < 1 or versions != 2 * pairs
+            or not isinstance(questions, int) or questions < versions):
+        raise ValueError("Frozen holdout needs two versions per pair and one question per version")
+    strata = stratum_pairs(preflight)
     if preflight.get("independent_human_adjudications") != 0:
         raise ValueError("Sensitivity plan must be generated before human adjudication")
     if preflight.get("holdout_model_evaluations") != 0:
@@ -163,8 +207,9 @@ def build_report(preflight: dict[str, Any], analysis_plan_bytes: bytes) -> dict[
         },
         "design_resolution": {
             "one_item_percentage_points": round(100 / questions, 4),
-            "one_item_in_consecutive_cohort_percentage_points": round(100 / 16, 4),
-            "one_item_in_change_enriched_cohort_percentage_points": round(100 / 8, 4),
+            **{f"one_item_in_{stratum}_stratum_percentage_points": round(100 / (2 * count), 4)
+               for stratum, count in sorted(strata.items())},
+            "label_pairs_by_stratum": strata,
             "independent_label_pair_clusters": pairs,
         },
         "exact_paired_binary_reference": {
@@ -176,10 +221,12 @@ def build_report(preflight: dict[str, Any], analysis_plan_bytes: bytes) -> dict[
             "minimum_all_candidate_wins_with_zero_losses_for_p_below_alpha": all_win_threshold,
             "p_value_five_wins_zero_losses": round(exact_mcnemar_p(5, 0), 6),
             "p_value_six_wins_zero_losses": round(exact_mcnemar_p(6, 0), 6),
-            "current_24_item_power_grid": power_grid(questions),
-            "twelve_cluster_sign_abstraction_power_grid": power_grid(pairs),
+            "current_item_power_grid": power_grid(questions),
+            "label_pair_cluster_sign_abstraction_power_grid": power_grid(pairs),
         },
         "optimistic_item_independent_planning_scenarios": planning_scenarios,
+        "empirical_validation_effect_reference": (
+            empirical_reference(error_analysis, questions) if error_analysis else None),
         "interpretation": {
             "current_claim_scope": "feasibility_and_descriptive_paired_evaluation",
             "superiority_claim": (
@@ -206,12 +253,22 @@ def build_report(preflight: dict[str, Any], analysis_plan_bytes: bytes) -> dict[
 
 
 def main() -> None:
-    preflight = json.loads(PREFLIGHT.read_text(encoding="utf-8"))
-    report = build_report(preflight, ANALYSIS_PLAN.read_bytes())
-    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--preflight", type=Path, default=PREFLIGHT)
+    parser.add_argument("--error-analysis", type=Path, default=ERROR_ANALYSIS)
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    args = parser.parse_args()
+    if args.output.exists():
+        parser.error("Refusing to overwrite a frozen design-sensitivity report")
+    preflight = json.loads(args.preflight.read_text(encoding="utf-8"))
+    error_analysis = json.loads(args.error_analysis.read_text(encoding="utf-8"))
+    report = build_report(preflight, ANALYSIS_PLAN.read_bytes(), error_analysis)
+    report["inputs"]["preflight_path"] = args.preflight.as_posix()
+    report["inputs"]["error_analysis_sha256"] = sha256(args.error_analysis.read_bytes()).hexdigest()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
-        "output": str(OUTPUT),
+        "output": str(args.output),
         "status": report["status"],
         "pairs": report["inputs"]["label_pairs"],
         "items": report["inputs"]["candidate_questions"],

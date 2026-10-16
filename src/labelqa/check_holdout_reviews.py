@@ -139,7 +139,7 @@ def check(candidates: Path, first: Path, second: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidates", type=Path, default=Path("data/holdout/version_question_candidates.jsonl"))
+    parser.add_argument("--candidates", type=Path, default=Path("data/holdout/version_question_candidates_expanded.jsonl"))
     parser.add_argument("--reader-a", type=Path, required=True)
     parser.add_argument("--reader-b", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("data/review/version_holdout_adjudication_queue.json"))
