@@ -17,6 +17,7 @@ REPORTS = (
     "results/clause_coverage_ablation.json",
     "results/candidate_pool_diagnostics.json",
     "results/deep_pool_ablation.json",
+    "results/set_aware_ablation.json",
     "results/retrieval_error_analysis.json",
     "results/paired_dev_qa_manifest.json",
     "results/paired_dev_qa_comparison.json",
