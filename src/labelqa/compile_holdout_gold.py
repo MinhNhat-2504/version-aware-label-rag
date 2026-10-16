@@ -7,7 +7,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
-from .check_holdout_reviews import CHANGE_JUDGMENTS, check, validate_evidence_spans
+from .check_holdout_reviews import (CHANGE_JUDGMENTS, check, validate_evidence_spans,
+                                    validate_span_locators, xml_passages)
 from .data import portable_path, read_jsonl
 from .review_resolution import compiled_status, is_llm, resolution
 
@@ -17,8 +18,13 @@ IMMUTABLE_QUEUE_FIELDS = ("qid", "set_id", "spl_version", "status", "reasons",
 
 
 def compile_gold(expected: dict, edited: dict, candidates: dict[str, dict],
-                 source_sections: dict[str, dict[int, str]]) -> tuple[list[dict], list[dict]]:
-    """Require a human decision on every item, including matching reader reviews."""
+                 source_sections: dict[str, dict[int, str]],
+                 passages: dict[str, list] | None = None) -> tuple[list[dict], list[dict]]:
+    """Require a human decision on every item, including matching reader reviews.
+
+    With ``passages`` (parsed pinned XML per qid), every final span must also map to one
+    parsed prose window or table row now, rather than failing after gold is frozen.
+    """
     base = {row["qid"]: row for row in expected["queue"]}
     rows = edited.get("queue")
     if not isinstance(rows, list) or len(rows) != len(base) or len({r.get("qid") for r in rows}) != len(base):
@@ -72,6 +78,8 @@ def compile_gold(expected: dict, edited: dict, candidates: dict[str, dict],
                                for index in group)):
                     raise ValueError(f"Final evidence references an absent section for {qid}")
             validate_evidence_spans(qid, claims, evidence, spans, source_sections[qid])
+            if passages is not None:
+                validate_span_locators(qid, spans, passages[qid])
         elif claims or evidence or spans:
             raise ValueError(f"Unanswerable item has positive final claims for {qid}")
         accepted.append({
@@ -98,11 +106,20 @@ def main() -> None:
     parser.add_argument("--reader-b", type=Path, required=True)
     parser.add_argument("--adjudicated-queue", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("data/holdout/version_gold_adjudicated.jsonl"))
+    parser.add_argument("--xml-dir", type=Path, default=Path("results/pinned_xml_holdout_review"),
+                        help="Pinned XML used to verify that every final span maps to a parsed passage")
+    parser.add_argument("--human-receipt", type=Path,
+                        help="Blind receipt of the human file when the other reader is an LLM annotation")
+    parser.add_argument("--llm-provenance", type=Path,
+                        help="Provenance receipt of the LLM annotation")
     args = parser.parse_args()
     manifest_path = args.output.with_suffix(".manifest.json")
     if args.output.exists() or manifest_path.exists():
         parser.error("Frozen output already exists; choose a new versioned path")
-    expected = check(args.candidates, args.reader_a, args.reader_b)
+    if not args.xml_dir.is_dir():
+        parser.error(f"Pinned XML not found in {args.xml_dir}; final locators must be checked before gold")
+    expected = check(args.candidates, args.reader_a, args.reader_b, args.xml_dir,
+                     args.human_receipt, args.llm_provenance)
     edited = json.loads(args.adjudicated_queue.read_text(encoding="utf-8"))
     if edited.get("reader_ids") != expected["reader_ids"]:
         raise ValueError("Adjudicated queue reader IDs differ from checked reviews")
@@ -119,7 +136,10 @@ def main() -> None:
             raise ValueError(f"Pinned source hash changed for {qid}")
         source_sections[qid] = {section["section_index"]: section["text"]
                                 for section in version["sections"]}
-    accepted, excluded = compile_gold(expected, edited, candidates, source_sections)
+    cache: dict = {}
+    passages = {qid: xml_passages(args.xml_dir, row["set_id"], row["spl_version"], row["xml_sha256"], cache)
+                for qid, row in candidates.items()}
+    accepted, excluded = compile_gold(expected, edited, candidates, source_sections, passages)
     resolved_rows = accepted + excluded
     resolution_mode = resolved_rows[0]["resolution_mode"]
     resolver_ids = resolved_rows[0]["resolver_ids"]
@@ -137,7 +157,10 @@ def main() -> None:
         "source_sha256": {str(path): sha256(path.read_bytes()).hexdigest()
                           for path in (args.candidates, args.reader_a, args.reader_b, args.adjudicated_queue)},
         "gold_sha256": sha256(args.output.read_bytes()).hexdigest(),
+        "reader_agreement": expected["agreement"],
     }
+    if "blind_receipts" in expected:
+        manifest["blind_receipts"] = expected["blind_receipts"]
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output), "manifest": str(manifest_path),
                       "accepted": len(accepted), "excluded": len(excluded)}))

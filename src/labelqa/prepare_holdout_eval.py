@@ -53,6 +53,11 @@ def load_manual_gold(path: Path) -> tuple[list[dict], dict]:
     for source, digest in sources.items():
         if not isinstance(digest, str) or sha256(portable_path(source).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Manual gold source receipt changed: {source}")
+    for name, receipt in (manifest.get("blind_receipts") or {}).items():
+        path = portable_path(receipt.get("receipt") or receipt.get("provenance") or "")
+        expected = receipt.get("receipt_sha256") or receipt.get("provenance_sha256")
+        if not path.is_file() or sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Blind review receipt changed or is missing: {name}")
     sample_flow(rows, manifest)
     return rows, manifest
 

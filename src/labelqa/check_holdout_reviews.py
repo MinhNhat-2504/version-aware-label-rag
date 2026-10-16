@@ -1,17 +1,71 @@
-"""Validate two independent review files and emit a manual adjudication queue."""
+"""Validate two independent review files and emit a manual adjudication queue.
+
+When one file comes from a disclosed ``llm_`` annotator, the human file must carry a
+blind receipt written by the single-reader self-check before the human saw any LLM
+output, and the LLM file must match its provenance receipt.
+"""
 
 from __future__ import annotations
 
 import argparse
 from collections import Counter
+from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
 
 from .data import portable_path, read_jsonl
+from .review_agreement import source_review_agreement
+from .review_resolution import is_llm
 
 
 DECISIONS = {"accept", "rewrite", "reject"}
 CHANGE_JUDGMENTS = {"material", "text_only", "stable", "uncertain"}
+BLIND_RECEIPT_STATUS = "human_reader_file_frozen_before_any_llm_comparison"
+LLM_PROVENANCE_STATUS = "disclosed_llm_annotation_not_human_review_not_gold"
+
+
+def file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def blind_receipt(report: dict, reader: Path, candidates: Path) -> dict:
+    """Freeze a human file's hash and time before the LLM file or queue is shown."""
+    reviewer = report["reader_ids"][0]
+    if is_llm(reviewer):
+        raise ValueError("LLM annotations use their provenance receipt, not a blind human receipt")
+    return {"status": BLIND_RECEIPT_STATUS, "reviewer_id": reviewer,
+            "reader_file": reader.as_posix(), "reader_sha256": file_sha256(reader),
+            "candidates_sha256": file_sha256(candidates),
+            "received_utc": datetime.now(timezone.utc).isoformat(), "self_check": report}
+
+
+def verify_blind_receipts(reader_paths: dict[str, Path], candidates: Path,
+                          human_receipt: Path | None, llm_provenance: Path | None) -> dict:
+    """Check the human blind receipt and the LLM provenance against the exact reader bytes."""
+    llm = [reader for reader in reader_paths if is_llm(reader)]
+    human = [reader for reader in reader_paths if not is_llm(reader)]
+    if len(llm) != 1 or len(human) != 1:
+        raise ValueError("Blind receipts apply to one human reader and one LLM annotator")
+    if human_receipt is None or llm_provenance is None:
+        raise ValueError("An LLM annotation needs the human blind receipt and the LLM provenance receipt")
+    receipt = json.loads(human_receipt.read_text(encoding="utf-8"))
+    if (receipt.get("status") != BLIND_RECEIPT_STATUS or receipt.get("reviewer_id") != human[0]
+            or receipt.get("reader_sha256") != file_sha256(reader_paths[human[0]])
+            or receipt.get("candidates_sha256") != file_sha256(candidates)):
+        raise ValueError("Human reader file differs from its blind receipt; it changed after freezing")
+    provenance = json.loads(llm_provenance.read_text(encoding="utf-8"))
+    if (provenance.get("status") != LLM_PROVENANCE_STATUS or provenance.get("annotator_id") != llm[0]
+            or provenance.get("annotation_sha256") != file_sha256(reader_paths[llm[0]])
+            or provenance.get("candidates_sha256") != file_sha256(candidates)):
+        raise ValueError("LLM annotation differs from its provenance receipt")
+    return {"human_reader": {"receipt": human_receipt.as_posix(),
+                             "receipt_sha256": file_sha256(human_receipt),
+                             "reader_sha256": receipt["reader_sha256"],
+                             "received_utc": receipt["received_utc"]},
+            "llm_annotation": {"provenance": llm_provenance.as_posix(),
+                               "provenance_sha256": file_sha256(llm_provenance),
+                               "annotation_sha256": provenance["annotation_sha256"]}}
 
 
 def normalized(text: str) -> str:
@@ -88,7 +142,8 @@ def index_reviews(path: Path) -> dict[str, dict]:
     return by_id
 
 
-def check(candidates: Path, first: Path, second: Path | None, xml_dir: Path | None = None) -> dict:
+def check(candidates: Path, first: Path, second: Path | None, xml_dir: Path | None = None,
+          human_receipt: Path | None = None, llm_provenance: Path | None = None) -> dict:
     """Validate two reader files and queue them; with no second file, self-check one reader."""
     goldless = index_reviews(candidates)
     a = index_reviews(first)
@@ -102,6 +157,10 @@ def check(candidates: Path, first: Path, second: Path | None, xml_dir: Path | No
             raise ValueError("One stable, nonempty reviewer ID is required")
     elif len(ids_a) != 1 or len(ids_b) != 1 or "" in ids_a | ids_b or ids_a == ids_b:
         raise ValueError("Two distinct, nonempty reviewer IDs are required")
+    receipts = None
+    if second is not None and any(is_llm(reader) for reader in ids_a | ids_b):
+        receipts = verify_blind_receipts({next(iter(ids_a)): first, next(iter(ids_b)): second},
+                                         candidates, human_receipt, llm_provenance)
     source_index = {}
     for source in {portable_path(row["source_snapshot"]) for row in goldless.values()}:
         for pair in read_jsonl(source):
@@ -185,9 +244,15 @@ def check(candidates: Path, first: Path, second: Path | None, xml_dir: Path | No
         return {"status": "single_reader_self_check_passed_not_adjudication",
                 "reader_ids": [next(iter(ids_a))], "items": len(a),
                 "decisions": dict(single_counts), "locators_checked": xml_dir is not None}
-    return {"reader_ids": [next(iter(ids_a)), next(iter(ids_b))], "items": len(queue),
-            "decision_pairs": dict(counts), "all_items_require_manual_adjudication": True,
-            "queue": queue}
+    reader_ids = [next(iter(ids_a)), next(iter(ids_b))]
+    report = {"reader_ids": reader_ids, "items": len(queue),
+              "decision_pairs": dict(counts), "all_items_require_manual_adjudication": True,
+              "agreement": source_review_agreement([(a[qid], b[qid]) for qid in goldless], reader_ids,
+                                                   [reader for reader in reader_ids if is_llm(reader)])}
+    if receipts is not None:
+        report["blind_receipts"] = receipts
+    report["queue"] = queue
+    return report
 
 
 def main() -> None:
@@ -200,18 +265,34 @@ def main() -> None:
     parser.add_argument("--xml-dir", type=Path, default=Path("results/pinned_xml_holdout_review"),
                         help="Pinned review XML used to verify prose-window and table-row locators")
     parser.add_argument("--skip-locator-check", action="store_true")
+    parser.add_argument("--receipt", type=Path,
+                        help="Self-check only: freeze a human file's hash and UTC time before any LLM comparison")
+    parser.add_argument("--human-receipt", type=Path,
+                        help="Blind receipt of the human file; required when the other file is an LLM annotation")
+    parser.add_argument("--llm-provenance", type=Path,
+                        help="Provenance receipt of the LLM annotation (from labelqa.build_llm_annotation)")
     args = parser.parse_args()
     if not args.skip_locator_check and not args.xml_dir.is_dir():
         parser.error(f"Review XML not found in {args.xml_dir}; run labelqa.fetch_review_xml first")
+    if args.receipt is not None and (args.reader_b is not None or args.skip_locator_check):
+        parser.error("--receipt needs a single reader file and the locator check")
+    if args.receipt is not None and args.receipt.exists():
+        parser.error("Blind receipt already exists; it is written once")
     report = check(args.candidates, args.reader_a, args.reader_b,
-                   None if args.skip_locator_check else args.xml_dir)
+                   None if args.skip_locator_check else args.xml_dir,
+                   args.human_receipt, args.llm_provenance)
     if args.reader_b is None:
+        if args.receipt is not None:
+            args.receipt.parent.mkdir(parents=True, exist_ok=True)
+            receipt = blind_receipt(report, args.reader_a, args.candidates)
+            args.receipt.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            report = {**report, "blind_receipt": str(args.receipt), "reader_sha256": receipt["reader_sha256"]}
         print(json.dumps(report, ensure_ascii=False))
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"items": report["items"], "decision_pairs": report["decision_pairs"],
-                      "output": str(args.output)}))
+                      "agreement_kind": report["agreement"]["kind"], "output": str(args.output)}))
 
 
 if __name__ == "__main__":

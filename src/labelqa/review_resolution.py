@@ -14,7 +14,7 @@ LLM_PREFIX = "llm_"
 
 
 def is_llm(reader_id: str) -> bool:
-    return isinstance(reader_id, str) and reader_id.strip().startswith(LLM_PREFIX)
+    return isinstance(reader_id, str) and reader_id.strip().casefold().startswith(LLM_PREFIX)
 
 
 def resolution(row: dict, reader_ids: list[str] | tuple[str, str], context: str) -> tuple[str, list[str]]:

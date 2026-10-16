@@ -252,10 +252,11 @@ def rehearse(root: Path, model: str) -> dict:
             "--xml-dir", "results/pinned_xml_holdout_after_gold")
     sign_gold_queue(root / queue, root / signed)
     run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,
-            "--reader-b", reader_b, "--adjudicated-queue", signed)
+            "--reader-b", reader_b, "--adjudicated-queue", signed,
+            "--xml-dir", "results/pinned_xml_holdout_after_gold")
     run.run("refuse_gold_overwrite", "compile_holdout_gold", "--candidates", candidates,
             "--reader-a", reader_a, "--reader-b", reader_b, "--adjudicated-queue", signed,
-            expect_failure=True)
+            "--xml-dir", "results/pinned_xml_holdout_after_gold", expect_failure=True)
     run.run("refuse_prompts_before_lock", "prepare_holdout_eval", "--method", "bm25",
             "--output", "results/holdout_bm25_prompts.jsonl", expect_failure=True)
     run.run("execution_lock", "lock_holdout_execution", "--model", model)
