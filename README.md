@@ -79,6 +79,8 @@ The method-blind answer review has its own offline interface in `answer_review_u
 
 ## Data and artifacts
 
+The frozen holdout data, AI annotations, AI silver standard, locks, prompts, model responses and reports are archived with SHA-256 checksums at Zenodo: https://doi.org/10.5281/zenodo.23477474 (CC BY 4.0). No human expert reviewed the holdout; see the archive README.
+
 The pipeline expects project-local `data/`, `results/` and `paper/` directories for full experiments. They are excluded from the source repository. Frozen inputs and outputs should be transferred through a controlled research archive with their SHA-256 manifests.
 
 ## Repository policy
