@@ -190,6 +190,17 @@ def write_llm_provenance(root: Path, reader_file: str, basis: str, basis_key: st
     return path
 
 
+def write_audit_flags(root: Path, queue: str, path: str) -> str:
+    """Synthetic AI-audit flag on the first queue item, bound to the rehearsal LLM file."""
+    checked = json.loads((root / queue).read_text(encoding="utf-8"))
+    flags = {"status": "ai_quality_audit_flags_not_human_review_not_gold", "auditor": "rehearsal fixture",
+             "audited_annotation_sha256": checked["blind_receipts"]["llm_annotation"]["annotation_sha256"],
+             "flags": [{"item_ids": [checked["queue"][0]["qid"]], "priority": "Low",
+                        "finding": "Synthetic rehearsal flag.", "suggestion": "No action."}]}
+    (root / path).write_text(json.dumps(flags, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def fill_resolution_sheet(path: Path, output: Path) -> None:
     """Rehearsal expert keeps their own review except one adopted LLM row."""
     import csv
@@ -300,12 +311,14 @@ def rehearse(root: Path, model: str, design: str = "llm_expert") -> dict:
     run.run("check_reader_files", "check_holdout_reviews", "--candidates", candidates,
             "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml, *receipts)
     if expert_design:
+        flags = write_audit_flags(root, queue, "data/review/rehearsal_audit_flags.json")
         run.run("expert_resolution_sheet", "expert_resolution", "sheet", "--queue", queue,
-                "--expert-id", readers[1], "--output-dir", "data/review/resolution")
+                "--expert-id", readers[1], "--output-dir", "data/review/resolution", "--audit-flags", flags)
         fill_resolution_sheet(root / "data/review/resolution/resolution_sheet.csv",
                               root / "data/review/resolution/filled.csv")
         run.run("expert_resolution_sign", "expert_resolution", "sign", "--queue", queue,
-                "--expert-id", readers[1], "--sheet", "data/review/resolution/filled.csv", "--output", signed)
+                "--expert-id", readers[1], "--sheet", "data/review/resolution/filled.csv",
+                "--audit-flags", flags, "--output", signed)
     else:
         sign_gold_queue(root / queue, root / signed)
     run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,

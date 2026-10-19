@@ -10,7 +10,7 @@ import uuid
 
 from labelqa.check_holdout_reviews import blind_receipt, check
 from labelqa.compile_holdout_gold import compile_gold
-from labelqa.expert_resolution import comparison_html, read_sheet, sheet_rows, sign, write_sheet
+from labelqa.expert_resolution import comparison_html, load_audit_flags, read_sheet, sheet_rows, sign, write_sheet
 from labelqa.export_reviewer_interface import ROOT
 from labelqa.recent import parse_sections
 from labelqa.review_agreement import cohen_kappa
@@ -145,6 +145,27 @@ class LlmExpertSourceReviewTests(unittest.TestCase):
         passages = {"q-v2": parse_structured_passages(SYNTHETIC_XML)}
         gold, _ = compile_gold(queue, signed, {"q-v2": self.candidate}, {"q-v2": self.sections}, passages)
         self.assertEqual(gold[0]["adjudication_notes"], "Lấy bản LLM.")
+
+    def test_ai_audit_flags_are_bound_to_the_audited_annotation(self):
+        queue = self.queue()
+        flags = self.root / "flags.json"
+        audit = {"status": "ai_quality_audit_flags_not_human_review_not_gold", "auditor": "Test audit",
+                 "audited_annotation_sha256": sha256(self.llm.read_bytes()).hexdigest(),
+                 "flags": [{"item_ids": ["q-v2"], "priority": "High", "finding": "Quote omits the number.",
+                            "suggestion": "Extend the quote."}]}
+        flags.write_text(json.dumps(audit), encoding="utf-8")
+        loaded = load_audit_flags(flags, queue)
+        self.assertEqual(sheet_rows(queue, EXPERT, loaded)[0]["ai_audit_flags"], "High: Quote omits the number.")
+        page = comparison_html(queue, EXPERT, loaded)
+        self.assertIn("Cờ rà soát của AI (Test audit)", page)
+        self.assertIn("Extend the quote.", page)
+        self.assertEqual(sheet_rows(queue, EXPERT)[0]["ai_audit_flags"], "")
+        for change, message in (({"audited_annotation_sha256": "0" * 64}, "different LLM annotation"),
+                                ({"flags": [{**audit["flags"][0], "item_ids": ["q-unknown"]}]}, "absent from the queue"),
+                                ({"status": "gold"}, "AI-audit status")):
+            flags.write_text(json.dumps({**audit, **change}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, message):
+                load_audit_flags(flags, queue)
 
     def test_sheet_requires_choice_notes_and_a_human_signer(self):
         queue = self.queue()

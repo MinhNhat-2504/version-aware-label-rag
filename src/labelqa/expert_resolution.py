@@ -12,6 +12,10 @@ queue (``answer_review check``). The expert fills one ``choice`` and ``notes`` p
 ``sign`` turns the filled sheet into a signed ``human_expert_resolution`` queue. Every
 item needs an explicit choice and notes; nothing is prefilled, and an LLM ID can never
 sign. Reader files and queue identity are left untouched for the compilers to verify.
+
+``--audit-flags`` adds a separate AI quality-control audit of the LLM annotation to the
+sheet and the comparison page, labelled as AI output. The flags file names the exact
+LLM annotation it audited; it is refused for any other annotation or unknown item.
 """
 
 from __future__ import annotations
@@ -30,8 +34,37 @@ from .review_resolution import is_llm
 
 SOURCE_CHOICES = ("expert", "llm", "revised", "reject")
 ANSWER_CHOICES = ("expert", "llm", "revised")
-COLUMNS = ("no", "item_id", "question", "differences", "expert_decision", "llm_decision",
-           "choice", "notes")
+COLUMNS = ("no", "item_id", "question", "differences", "ai_audit_flags", "expert_decision",
+           "llm_decision", "choice", "notes")
+AUDIT_STATUS = "ai_quality_audit_flags_not_human_review_not_gold"
+
+
+def load_audit_flags(path: Path, queue: dict) -> dict:
+    """Validate an AI audit of the LLM annotation and index its flags by item ID."""
+    audit = json.loads(path.read_text(encoding="utf-8"))
+    if audit.get("status") != AUDIT_STATUS or not audit.get("auditor") or not isinstance(audit.get("flags"), list):
+        raise ValueError("Audit flags must declare the AI-audit status, the auditor and a flag list")
+    receipts = queue.get("blind_receipts") or {}
+    audited = (receipts.get("llm_annotation") or {}).get("annotation_sha256")
+    if audited is None or audit.get("audited_annotation_sha256") != audited:
+        raise ValueError("Audit flags were made for a different LLM annotation than this queue")
+    known = {item_id(row) for row in queue["queue"]}
+    by_item: dict[str, list[dict]] = {}
+    for flag in audit["flags"]:
+        ids = flag.get("item_ids")
+        if (not isinstance(ids, list) or not ids or flag.get("priority") not in ("High", "Medium", "Low")
+                or not str(flag.get("finding", "")).strip()):
+            raise ValueError("Each audit flag needs item IDs, a High/Medium/Low priority and a finding")
+        unknown = sorted(set(ids) - known)
+        if unknown:
+            raise ValueError(f"Audit flags name items absent from the queue: {unknown}")
+        for key in ids:
+            by_item.setdefault(key, []).append(flag)
+    return {"auditor": audit["auditor"], "by_item": by_item}
+
+
+def flag_summary(flags: list[dict]) -> str:
+    return " | ".join(f"{flag['priority']}: {flag['finding']}" for flag in flags)
 
 
 def queue_kind(queue: dict) -> str:
@@ -67,14 +100,16 @@ def decision_summary(review: dict, kind: str) -> str:
     return decision
 
 
-def sheet_rows(queue: dict, expert_id: str) -> list[dict]:
+def sheet_rows(queue: dict, expert_id: str, audit: dict | None = None) -> list[dict]:
     kind = queue_kind(queue)
     expert_side, llm_side = sides(queue, expert_id)
+    flags = (audit or {}).get("by_item", {})
     rows = []
     for number, row in enumerate(queue["queue"], 1):
         rows.append({"no": number, "item_id": item_id(row),
                      "question": row[expert_side].get("question", ""),
                      "differences": "; ".join(row.get("reasons", [])),
+                     "ai_audit_flags": flag_summary(flags.get(item_id(row), [])),
                      "expert_decision": decision_summary(row[expert_side], kind),
                      "llm_decision": decision_summary(row[llm_side], kind),
                      "choice": "", "notes": ""})
@@ -209,10 +244,22 @@ def answer_review_html(review: dict) -> str:
             f"<p class='muted'>{esc(review.get('review_notes'))}</p>")
 
 
-def comparison_html(queue: dict, expert_id: str) -> str:
+def audit_html(flags: list[dict], auditor: str) -> str:
+    if not flags:
+        return ""
+    items = "".join(f"<li><b>{esc(flag['priority'])}:</b> {esc(flag['finding'])}"
+                    + (f"<br><span class='muted'>Gợi ý kiểm tra: {esc(flag['suggestion'])}</span>"
+                       if flag.get("suggestion") else "") + "</li>" for flag in flags)
+    return (f"<div class='audit'><h3>Cờ rà soát của AI ({esc(auditor)}), không phải chuyên gia</h3>"
+            f"<ul>{items}</ul></div>")
+
+
+def comparison_html(queue: dict, expert_id: str, audit: dict | None = None) -> str:
     kind = queue_kind(queue)
     expert_side, llm_side = sides(queue, expert_id)
     render = source_review_html if kind == "source" else answer_review_html
+    flags = (audit or {}).get("by_item", {})
+    auditor = (audit or {}).get("auditor", "")
     blocks = []
     for number, row in enumerate(queue["queue"], 1):
         expert, llm = row[expert_side], row[llm_side]
@@ -225,7 +272,8 @@ def comparison_html(queue: dict, expert_id: str) -> str:
         blocks.append(
             f"<section id='item-{number}'><h2>{number}. {esc(item_id(row))}{version}</h2>"
             f"<p class='q'>{esc(expert.get('question'))}</p>"
-            f"<p class='diff'>Khác biệt: {esc('; '.join(row.get('reasons', [])))}</p>{context}"
+            f"<p class='diff'>Khác biệt: {esc('; '.join(row.get('reasons', [])))}</p>"
+            f"{audit_html(flags.get(item_id(row), []), auditor)}{context}"
             f"<div class='cols'><div><h3>Chuyên gia (phiếu làm mù của bạn)</h3>{render(expert)}</div>"
             f"<div><h3>LLM (chú giải AI có công bố)</h3>{render(llm)}</div></div></section>")
     title = "Hòa giải của chuyên gia: thẩm định nguồn" if kind == "source" else "Hòa giải của chuyên gia: chấm câu trả lời"
@@ -242,11 +290,15 @@ h2 {{ font-size:16px; margin:0 0 4px; }} h3 {{ font-size:14px; margin:8px 0; col
 .cols {{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }}
 @media (max-width:720px) {{ .cols {{ grid-template-columns:1fr; }} }}
 pre {{ white-space:pre-wrap; font-size:12px; }} td {{ padding:2px 8px 2px 0; vertical-align:top; }}
+.audit {{ margin:8px 0; padding:8px 12px; border-left:4px solid var(--accent); background:rgba(138,75,15,.08); }}
+.audit h3 {{ margin:0 0 4px; }} .audit ul {{ margin:0; padding-left:20px; }}
 </style></head><body>
 <h1>{title}</h1>
 <p>Mã chuyên gia: <b>{esc(expert_id)}</b>. Cột LLM là chú giải của AI, không phải người thẩm định.
 Với mỗi mục, ghi một <code>choice</code> (expert, llm, revised hoặc reject) và một ghi chú vào bảng tính.
 Gold chỉ là những gì bạn ký.</p>
+{(f"<p class='audit'>Một số mục có <b>cờ rà soát của AI ({esc(auditor)})</b> về phiếu LLM. Cờ chỉ là gợi ý kiểm tra "
+  "và có thể sai; hãy tự đối chiếu với nhãn.</p>") if flags else ""}
 {''.join(blocks)}
 </body></html>
 """
@@ -259,23 +311,29 @@ def main() -> None:
     sheet_parser.add_argument("--queue", type=Path, required=True)
     sheet_parser.add_argument("--expert-id", required=True)
     sheet_parser.add_argument("--output-dir", type=Path, required=True)
+    sheet_parser.add_argument("--audit-flags", type=Path,
+                              help="Optional AI quality-control flags on the LLM annotation (JSON)")
     sign_parser = sub.add_parser("sign", help="Turn the filled spreadsheet into a signed queue")
     sign_parser.add_argument("--queue", type=Path, required=True)
     sign_parser.add_argument("--expert-id", required=True)
     sign_parser.add_argument("--sheet", type=Path, required=True)
     sign_parser.add_argument("--revised", type=Path,
                              help="Optional file the expert exported after comparison, for 'revised' items")
+    sign_parser.add_argument("--audit-flags", type=Path,
+                             help="The same AI audit flags file shown in the sheet, to record its hash")
     sign_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     queue = json.loads(args.queue.read_text(encoding="utf-8"))
+    audit = load_audit_flags(args.audit_flags, queue) if args.audit_flags else None
     if args.mode == "sheet":
         sheet, page = args.output_dir / "resolution_sheet.csv", args.output_dir / "resolution_comparison.html"
         if sheet.exists() or page.exists():
             parser.error("Resolution sheet already exists; keep the expert's filled copy")
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        write_sheet(sheet_rows(queue, args.expert_id), sheet)
-        page.write_text(comparison_html(queue, args.expert_id), encoding="utf-8", newline="\n")
-        print(json.dumps({"sheet": str(sheet), "comparison": str(page), "items": len(queue["queue"])}))
+        write_sheet(sheet_rows(queue, args.expert_id, audit), sheet)
+        page.write_text(comparison_html(queue, args.expert_id, audit), encoding="utf-8", newline="\n")
+        print(json.dumps({"sheet": str(sheet), "comparison": str(page), "items": len(queue["queue"]),
+                          "flagged_items": len(audit["by_item"]) if audit else 0}))
         return
     if args.output.exists():
         parser.error("Signed queue already exists; write a new versioned path")
@@ -283,7 +341,8 @@ def main() -> None:
     signed = sign(queue, read_sheet(args.sheet), args.expert_id, revised)
     signed["expert_resolution_inputs"] = {
         "sheet_sha256": sha256(args.sheet.read_bytes()).hexdigest(),
-        "revised_sha256": sha256(args.revised.read_bytes()).hexdigest() if args.revised else None}
+        "revised_sha256": sha256(args.revised.read_bytes()).hexdigest() if args.revised else None,
+        "audit_flags_sha256": sha256(args.audit_flags.read_bytes()).hexdigest() if args.audit_flags else None}
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(signed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     counts: dict[str, int] = {}
