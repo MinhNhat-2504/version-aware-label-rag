@@ -83,4 +83,4 @@ The pipeline expects project-local `data/`, `results/` and `paper/` directories 
 
 ## Repository policy
 
-See [REPOSITORY_RELEASE.md](REPOSITORY_RELEASE.md) for release checks and repository settings. A project license must be selected by the owner before a public release.
+See [REPOSITORY_RELEASE.md](REPOSITORY_RELEASE.md) for release checks and repository settings. The original code and documentation are released under the [MIT License](LICENSE). Third-party data such as the FDARxBench snapshot and DailyMed SPL files are not included in this repository and remain under their own terms.

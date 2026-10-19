@@ -44,9 +44,10 @@ class RepositoryPreflightTests(unittest.TestCase):
         )
 
     def test_public_release_remains_blocked_before_holdout_execution(self):
+        if (ROOT / "paper/HOLDOUT_EXECUTION_LOCK.json").is_file():
+            self.skipTest("This workspace has already run the locked holdout")
         report = check("public", ROOT)
         self.assertEqual(report["status"], "blocked")
-        # A local workspace may already hold the reference; CI never does. Neither has a lock yet.
         if not (ROOT / "data/holdout/version_silver_ai.jsonl").is_file():
             self.assertFalse(report["checks"]["holdout_reference_valid"])
         self.assertFalse(report["checks"]["holdout_execution_lock_valid"])

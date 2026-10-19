@@ -47,7 +47,7 @@ when `.gitignore` is configured correctly.
 - Require the `CI` check before merging into `main`.
 - Disable force pushes and branch deletion on `main`.
 - Keep reviewer exports, datasets and manuscripts outside the repository.
-- Choose the project license before making the repository public. Licensing is a project-owner decision and should cover only original code and documentation; the vendored FDARxBench snapshot retains its upstream license.
+- License: MIT (`LICENSE`), covering only original code and documentation; the FDARxBench snapshot and DailyMed files are not in the repository and retain their own terms.
 
 ## First push
 

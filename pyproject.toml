@@ -7,6 +7,7 @@ name = "label-evidence-research"
 version = "0.1.0"
 description = "Reproducible evidence retrieval experiments for FDARxBench"
 requires-python = ">=3.10"
+license = {text = "MIT"}
 dependencies = []
 
 [project.scripts]

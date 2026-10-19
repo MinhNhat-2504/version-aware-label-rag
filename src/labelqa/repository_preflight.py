@@ -16,6 +16,7 @@ from .export_reviewer_interface import ROOT, build_payload, bundle_text
 
 SOURCE_REQUIRED_FILES = (
     Path(".gitattributes"),
+    Path("LICENSE"),
     Path(".github/workflows/ci.yml"),
     Path("README.md"),
     Path("pyproject.toml"),
