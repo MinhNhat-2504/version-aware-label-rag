@@ -103,7 +103,7 @@ def holdout_gates(root: Path) -> tuple[dict[str, bool], list[str]]:
             _, lock_hash = verify_lock(DEFAULT_LOCK, gold, DEFAULT_GOLD, receipt)
             checks["holdout_execution_lock_valid"] = True
         except (OSError, ValueError, KeyError) as error:
-            reasons.append(f"holdout gold/lock check failed: {error}")
+            reasons.append(f"holdout reference/lock check failed: {error}")
             return checks, reasons
         from .review_resolution import SILVER_STATUS
         # Amendment 6: an AI silver reference is scored mechanically, never by human answer review.
