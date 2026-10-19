@@ -86,9 +86,12 @@ def summarize(gold: list[dict], prompts: dict[str, dict[str, dict]]) -> dict:
                     "answerable": row["answerable"], "cohort": cohort}
         for method in METHODS:
             prompt = prompts[method][qid]
-            for key in ("qid", "set_id", "spl_version", "question", "xml_sha256", "source_snapshot"):
+            for key in ("qid", "set_id", "spl_version", "question", "xml_sha256"):
                 if prompt.get(key) != row.get(key):
                     raise ValueError(f"Gold/prompt identity mismatch: {qid}, {method}, {key}")
+            # Frozen candidates written on Windows keep backslashes; compare normalized paths.
+            if portable_path(prompt.get("source_snapshot", "")).as_posix() != portable_path(row["source_snapshot"]).as_posix():
+                raise ValueError(f"Gold/prompt identity mismatch: {qid}, {method}, source_snapshot")
             if (prompt.get("task") == "refusal") != (not row["answerable"]):
                 raise ValueError(f"Gold/prompt answerability mismatch: {qid}, {method}")
             retrieved = prompt.get("retrieved_indices")

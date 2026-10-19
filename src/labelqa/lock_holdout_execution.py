@@ -83,7 +83,7 @@ def lock_payload(gold: list[dict], gold_path: Path, receipt: dict, plan: Path,
     for source in sorted({row["source_snapshot"] for row in gold}):
         sources[source] = digest(portable_path(source))
     return {
-        "status": "holdout_execution_locked_after_manual_gold_before_model_calls",
+        "status": "holdout_execution_locked_after_reference_before_model_calls",
         "gold_sha256": receipt["gold_sha256"],
         "gold_manifest_sha256": digest(gold_path.with_suffix(".manifest.json")),
         "analysis_plan": str(plan), "analysis_plan_sha256": digest(plan),
@@ -110,7 +110,7 @@ def verify_lock(path: Path, gold: list[dict], gold_path: Path, receipt: dict) ->
     if not path.is_file():
         raise ValueError("Frozen execution lock is required before holdout prompts or responses")
     locked = json.loads(path.read_text(encoding="utf-8"))
-    if locked.get("status") != "holdout_execution_locked_after_manual_gold_before_model_calls":
+    if locked.get("status") != "holdout_execution_locked_after_reference_before_model_calls":
         raise ValueError("Unrecognized holdout execution lock")
     options = locked.get("decoding_options")
     if not isinstance(options, dict):

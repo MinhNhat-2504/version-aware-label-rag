@@ -46,6 +46,19 @@ class HoldoutRetrievalSummaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Different accepted evidence groups"):
             summarize([row], prompts)
 
+    def test_windows_snapshot_paths_match_their_posix_form(self):
+        row = {"qid": "q", "set_id": "a", "spl_version": 2, "question": "Q?", "xml_sha256": "x",
+               "source_snapshot": "data\\snapshots\\version_holdout_sources.jsonl",
+               "answerable": True, "claims": [{"text": "one"}]}
+        prompts = {method: {"q": {**{k: row[k] for k in ("qid", "set_id", "spl_version", "question", "xml_sha256")},
+                                  "source_snapshot": "data/snapshots/version_holdout_sources.jsonl",
+                                  "task": "factual", "gold_claims": [[1]], "retrieved_indices": [1]}}
+                   for method in METHODS}
+        self.assertTrue(summarize([row], prompts)["per_item"][0]["bm25"])
+        prompts["bm25"]["q"]["source_snapshot"] = "data/snapshots/version_change_cohort_sources.jsonl"
+        with self.assertRaisesRegex(ValueError, "source_snapshot"):
+            summarize([row], prompts)
+
     def test_answerability_mismatch_fails(self):
         row = {"qid": "q", "set_id": "a", "spl_version": 2, "question": "Q?",
                "xml_sha256": "x", "source_snapshot": "version_holdout_sources.jsonl",

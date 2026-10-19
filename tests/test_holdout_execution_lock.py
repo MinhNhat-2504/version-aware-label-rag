@@ -57,8 +57,8 @@ class HoldoutExecutionLockTests(unittest.TestCase):
     def test_runner_rejects_wrong_seed_or_existing_holdout_output(self):
         locked = {"answer_model": "model", "decoding_options": {"seed": 20261016},
                   "request_timeout_seconds": 180,
-                  "prompt_paths": {"bm25": "results/holdout_bm25_prompts.jsonl"},
-                  "response_paths": {"bm25": "results/holdout_bm25_responses.jsonl"}}
+                  "prompt_paths": {"bm25": "results/.never_created_holdout_bm25_prompts.jsonl"},
+                  "response_paths": {"bm25": "results/.never_created_holdout_bm25_responses.jsonl"}}
         prompt = Path(locked["prompt_paths"]["bm25"])
         response = Path(locked["response_paths"]["bm25"])
         validate_locked_run("model", 20261016, 180, prompt, response, "bm25", locked)
@@ -71,8 +71,8 @@ class HoldoutExecutionLockTests(unittest.TestCase):
     def test_resume_is_explicit_and_never_repeats_a_saved_call(self):
         locked = {"answer_model": "model", "decoding_options": {"seed": 20261016},
                   "request_timeout_seconds": 180,
-                  "prompt_paths": {"bm25": "results/holdout_bm25_prompts.jsonl"},
-                  "response_paths": {"bm25": "results/holdout_bm25_responses.jsonl"}}
+                  "prompt_paths": {"bm25": "results/.never_created_holdout_bm25_prompts.jsonl"},
+                  "response_paths": {"bm25": "results/.never_created_holdout_bm25_responses.jsonl"}}
         prompt = Path(locked["prompt_paths"]["bm25"])
         response = Path(locked["response_paths"]["bm25"])
         with patch.object(Path, "exists", return_value=True):
