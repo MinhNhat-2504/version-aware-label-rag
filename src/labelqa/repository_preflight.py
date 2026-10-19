@@ -20,7 +20,6 @@ SOURCE_REQUIRED_FILES = (
     Path("README.md"),
     Path("pyproject.toml"),
     Path("REPOSITORY_RELEASE.md"),
-    Path("reviewer_ui/README.md"),
     Path("reviewer_ui/dist/index.html"),
     Path("reviewer_ui/dist/styles.css"),
     Path("reviewer_ui/dist/app.js"),
