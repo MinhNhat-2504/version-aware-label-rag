@@ -73,7 +73,7 @@ python -m labelqa.export_reviewer_interface
 
 Then open `reviewer_ui/dist/index.html`.
 
-The active review design pairs one disclosed LLM annotation (an `llm_` reviewer ID) with one human expert, who alone signs every final item; an LLM ID can never sign. `python -m labelqa.rehearse_holdout_pipeline --design llm_expert --root <new-dir>` rehearses the whole post-review sequence on development labels.
+The holdout has no human review. Its reference is an AI silver standard compiled by a fixed rule from two disclosed AI annotations (`labelqa.compile_silver_standard`), and holdout answers are scored mechanically (`labelqa.summarize_holdout_mechanical`); no clinical claim is made from it. AI reviewer IDs (for example `llm_…` or `codex_…`) can never receive a human receipt or sign a resolution. `python -m labelqa.rehearse_holdout_pipeline --design ai_silver --root <new-dir>` rehearses this sequence on development labels; the human-review designs remain available as `llm_expert` and `two_reader`.
 
 The method-blind answer review has its own offline interface in `answer_review_ui/dist/`; its generated `answer-review-data.js` (model outputs on the holdout) is excluded from Git.
 
