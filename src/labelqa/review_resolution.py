@@ -1,20 +1,31 @@
 """Validate independent adjudication, signed two-reader consensus or expert resolution.
 
-A reader ID starting with ``llm_`` marks a disclosed language-model annotator. Such an
+A reader ID such as ``llm_...`` or ``codex_...`` marks a disclosed AI annotator. Such an
 annotator may provide one independent annotation file, but it can never sign a
 consensus or act as adjudicator: when one is present, the human reader must resolve
 every item (``human_expert_resolution``) or a distinct human adjudicator must do so.
+
+Without any human reader, ``labelqa.compile_silver_standard`` applies a fixed rule to two
+AI annotations; its output is an AI silver standard, never human gold.
 """
 
 from __future__ import annotations
 
+import re
+
 
 MODES = {"independent_adjudicator", "two_reader_consensus", "human_expert_resolution"}
 LLM_PREFIX = "llm_"
+# AI annotator IDs: a known AI prefix, or an "ai", "llm", "codex" or "simulation" token.
+AI_ID = re.compile(r"^(llm|ai|codex|gpt|claude|gemini)[_-]|(^|[_-])(ai|llm|codex|simulation)([_-]|$)",
+                   re.IGNORECASE)
+SILVER_MODE = "ai_silver_rule"
+SILVER_STATUS = "ai_silver_standard_rule_compiled_no_human_review_not_gold"
 
 
 def is_llm(reader_id: str) -> bool:
-    return isinstance(reader_id, str) and reader_id.strip().casefold().startswith(LLM_PREFIX)
+    """True for any disclosed AI annotator ID; such an ID can never sign or count as human."""
+    return isinstance(reader_id, str) and bool(AI_ID.search(reader_id.strip()))
 
 
 def resolution(row: dict, reader_ids: list[str] | tuple[str, str], context: str) -> tuple[str, list[str]]:
@@ -78,11 +89,17 @@ def review_design(manifest: dict) -> dict:
     """Who reviewed and who signed, for reports; LLM IDs are always listed separately."""
     readers = list(manifest.get("reader_ids") or [])
     llm = [reader for reader in readers if is_llm(reader)]
+    if readers and len(llm) == len(readers):
+        kind = "ai_ai_agreement_not_reliability"
+    elif llm:
+        kind = "expert_llm_agreement_not_inter_human_reliability"
+    else:
+        kind = "inter_reader_agreement"
     return {"resolution_mode": manifest.get("resolution_mode"),
             "resolver_ids": manifest.get("resolver_ids"),
             "reader_ids": readers, "llm_annotator_ids": llm,
-            "agreement_kind": ("expert_llm_agreement_not_inter_human_reliability" if llm
-                               else "inter_reader_agreement")}
+            "human_review": bool(readers) and len(llm) < len(readers),
+            "agreement_kind": kind}
 
 
 def accepted_statuses(kind: str) -> set[str]:

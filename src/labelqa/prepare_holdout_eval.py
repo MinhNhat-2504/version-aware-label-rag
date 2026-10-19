@@ -15,24 +15,30 @@ from .learned_retrieval import FEATURE_NAMES, retrieve as learned_retrieve
 from .prompts import SYSTEM_PROMPT
 from .recent import parse_sections
 from .retrieval import LabelIndex
-from .review_resolution import accepted_statuses, validate_compiled_resolution
+from .review_resolution import SILVER_MODE, SILVER_STATUS, accepted_statuses, validate_compiled_resolution
 from .spl_tables import StructuredPassage, parse_structured_passages, structured_manifest
 
 
-DEFAULT_GOLD = Path("data/holdout/version_gold_adjudicated.jsonl")
+# Amendment 6: no human reader, so the active reference is the AI silver standard.
+DEFAULT_GOLD = Path("data/holdout/version_silver_ai.jsonl")
 MODEL = Path("results/learned_selector_model.json")
 MODEL_REPORT = Path("results/learned_selector_validation.json")
 SAFE_ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
 def load_manual_gold(path: Path) -> tuple[list[dict], dict]:
-    """Fail before reading any holdout source when adjudicated gold is absent."""
+    """Fail before reading any holdout source when the reference is absent or unverified.
+
+    The reference is human-resolved gold or, under Amendment 6, the rule-compiled AI silver
+    standard; the manifest status keeps the two apart in every downstream report.
+    """
     manifest_path = path.with_suffix(".manifest.json")
     if not path.is_file() or not manifest_path.is_file():
         raise ValueError("Manual adjudicated gold and its manifest are required; candidate questions are not gold")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("status") not in accepted_statuses("gold"):
-        raise ValueError("Gold manifest is not from the manual adjudication compiler")
+    silver = manifest.get("status") == SILVER_STATUS
+    if manifest.get("status") not in accepted_statuses("gold") and not silver:
+        raise ValueError("Gold manifest is not from the manual adjudication or AI silver compiler")
     if sha256(path.read_bytes()).hexdigest() != manifest.get("gold_sha256"):
         raise ValueError("Adjudicated gold checksum changed")
     rows = list(read_jsonl(path))
@@ -42,7 +48,12 @@ def load_manual_gold(path: Path) -> tuple[list[dict], dict]:
     if len(readers) != 2 or not all(isinstance(x, str) and x.strip() for x in readers) or readers[0] == readers[1]:
         raise ValueError("Two distinct reader IDs are required")
     for row in rows:
-        validate_compiled_resolution(row, manifest, readers, row["qid"])
+        if silver:
+            if (row.get("resolution_mode") != SILVER_MODE or row.get("resolver_ids") != []
+                    or manifest.get("resolution_mode") != SILVER_MODE):
+                raise ValueError(f"Silver row does not carry the AI silver rule: {row['qid']}")
+        else:
+            validate_compiled_resolution(row, manifest, readers, row["qid"])
         if not row.get("adjudication_notes", "").strip():
             raise ValueError(f"Missing manual resolution notes for {row['qid']}")
         if row.get("answerable") and not row.get("claims"):
@@ -53,6 +64,9 @@ def load_manual_gold(path: Path) -> tuple[list[dict], dict]:
     for source, digest in sources.items():
         if not isinstance(digest, str) or sha256(portable_path(source).read_bytes()).hexdigest() != digest:
             raise ValueError(f"Manual gold source receipt changed: {source}")
+    for source, digest in (manifest.get("provenance_sha256") or {}).items():
+        if sha256(portable_path(source).read_bytes()).hexdigest() != digest:
+            raise ValueError(f"AI annotation provenance changed: {source}")
     for name, receipt in (manifest.get("blind_receipts") or {}).items():
         path = portable_path(receipt.get("receipt") or receipt.get("provenance") or "")
         expected = receipt.get("receipt_sha256") or receipt.get("provenance_sha256")

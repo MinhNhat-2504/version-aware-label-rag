@@ -46,9 +46,9 @@ class RepositoryPreflightTests(unittest.TestCase):
     def test_public_release_remains_blocked_before_human_holdout(self):
         report = check("public", ROOT)
         self.assertEqual(report["status"], "blocked")
-        self.assertFalse(report["checks"]["manual_gold_and_receipt_valid"])
+        self.assertFalse(report["checks"]["holdout_reference_valid"])
         self.assertFalse(report["checks"]["holdout_execution_lock_valid"])
-        self.assertFalse(report["checks"]["holdout_answer_scores_match_gold_and_lock"])
+        self.assertFalse(report["checks"]["holdout_answer_endpoint_matches_reference_and_lock"])
 
     def test_public_gates_verify_reports_against_gold_and_lock(self):
         root = ROOT / "results" / ".test-public-gates"
@@ -69,7 +69,7 @@ class RepositoryPreflightTests(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
         self.assertTrue(gates["holdout_execution_lock_valid"])
         self.assertTrue(gates["holdout_retrieval_summary_matches_gold_and_lock"])
-        self.assertFalse(gates["holdout_answer_scores_match_gold_and_lock"])
+        self.assertFalse(gates["holdout_answer_endpoint_matches_reference_and_lock"])
         self.assertEqual(len(reasons), 1)
 
 

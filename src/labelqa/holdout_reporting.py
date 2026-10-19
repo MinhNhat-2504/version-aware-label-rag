@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from .data import portable_path
+from .review_resolution import SILVER_MODE
 
 
 COHORTS = {
@@ -60,7 +61,8 @@ def sample_flow(gold: list[dict], manifest: dict) -> dict:
     for row in exclusions:
         has_resolution = (isinstance(row.get("resolution_mode"), str)
                           and isinstance(row.get("resolver_ids"), list)
-                          and bool(row["resolver_ids"]))
+                          and (bool(row["resolver_ids"])
+                               or row["resolution_mode"] == SILVER_MODE))  # Rule-based, no signer.
         has_legacy_adjudicator = (isinstance(row.get("adjudicator_id"), str)
                                   and bool(row["adjudicator_id"].strip()))
         if (not isinstance(row.get("reason"), str) or not row["reason"].strip()

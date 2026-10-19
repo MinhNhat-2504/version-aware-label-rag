@@ -90,26 +90,31 @@ def working_directory(path: Path):
 
 def holdout_gates(root: Path) -> tuple[dict[str, bool], list[str]]:
     """Verify, not just find, the gold, lock and holdout reports behind a public release."""
-    checks = {"manual_gold_and_receipt_valid": False, "holdout_execution_lock_valid": False,
+    checks = {"holdout_reference_valid": False, "holdout_execution_lock_valid": False,
               "holdout_retrieval_summary_matches_gold_and_lock": False,
-              "holdout_answer_scores_match_gold_and_lock": False}
+              "holdout_answer_endpoint_matches_reference_and_lock": False}
     reasons: list[str] = []
     with working_directory(root):
         from .lock_holdout_execution import DEFAULT_LOCK, verify_lock
         from .prepare_holdout_eval import DEFAULT_GOLD, load_manual_gold
         try:
             gold, receipt = load_manual_gold(DEFAULT_GOLD)
-            checks["manual_gold_and_receipt_valid"] = True
+            checks["holdout_reference_valid"] = True
             _, lock_hash = verify_lock(DEFAULT_LOCK, gold, DEFAULT_GOLD, receipt)
             checks["holdout_execution_lock_valid"] = True
         except (OSError, ValueError, KeyError) as error:
             reasons.append(f"holdout gold/lock check failed: {error}")
             return checks, reasons
+        from .review_resolution import SILVER_STATUS
+        # Amendment 6: an AI silver reference is scored mechanically, never by human answer review.
+        endpoint = (("results/holdout_mechanical_scores.json",
+                     "descriptive_mechanical_answer_scores_against_reference_no_clinical_claim")
+                    if receipt.get("status") == SILVER_STATUS else
+                    ("results/holdout_answer_scores.json", "manual_adjudicated_end_to_end_answer_score_after_gold"))
         for name, path, status in (
                 ("holdout_retrieval_summary_matches_gold_and_lock", "results/holdout_retrieval_summary.json",
                  "after_manual_gold_retrieval_only_no_answer_support_claim"),
-                ("holdout_answer_scores_match_gold_and_lock", "results/holdout_answer_scores.json",
-                 "manual_adjudicated_end_to_end_answer_score_after_gold")):
+                ("holdout_answer_endpoint_matches_reference_and_lock", *endpoint)):
             report_path = Path(path)
             report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else {}
             checks[name] = (report.get("status") == status

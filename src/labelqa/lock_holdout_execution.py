@@ -20,7 +20,8 @@ DEFAULT_XML_DIR = Path("results/pinned_xml_holdout_after_gold")
 METHODS = ("bm25", "learned_cover", "ontology_cover")
 CODE_FILES = (
     "src/labelqa/answer_review.py", "src/labelqa/check_holdout_reviews.py",
-    "src/labelqa/compile_holdout_gold.py", "src/labelqa/data.py",
+    "src/labelqa/compile_holdout_gold.py", "src/labelqa/compile_silver_standard.py", "src/labelqa/data.py",
+    "src/labelqa/summarize_holdout_mechanical.py",
     "src/labelqa/build_llm_answer_review.py", "src/labelqa/expert_resolution.py",
     "src/labelqa/export_answer_review_interface.py", "src/labelqa/review_agreement.py",
     "answer_review_ui/dist/app.js", "answer_review_ui/dist/logic.js",

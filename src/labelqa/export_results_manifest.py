@@ -56,7 +56,7 @@ REPORTS = (
     "results/synthetic_claim_judge_pilot.json",
     "results/holdout_source_preflight.json",
     "results/holdout_source_preflight_expanded.json",
-    "results/holdout_pipeline_rehearsal_v5.json",
+    "results/holdout_pipeline_rehearsal_v6_ai_silver.json",
     "results/equivalence_adjudicated_pilot_coverage.json",
 )
 SOURCES = (
@@ -76,12 +76,14 @@ SOURCES = (
 )
 
 
-HOLDOUT_GOLD = "data/holdout/version_gold_adjudicated.jsonl"
-HOLDOUT_GOLD_MANIFEST = "data/holdout/version_gold_adjudicated.manifest.json"
+HOLDOUT_GOLD = "data/holdout/version_silver_ai.jsonl"  # Amendment 6: AI silver standard.
+HOLDOUT_GOLD_MANIFEST = "data/holdout/version_silver_ai.manifest.json"
 HOLDOUT_LOCK = "paper/HOLDOUT_EXECUTION_LOCK.json"
 HOLDOUT_RETRIEVAL = "results/holdout_retrieval_summary.json"
 HOLDOUT_SCORES = "results/holdout_answer_scores.json"
-HOLDOUT_ARTIFACTS = (HOLDOUT_GOLD, HOLDOUT_GOLD_MANIFEST, HOLDOUT_LOCK, HOLDOUT_RETRIEVAL, HOLDOUT_SCORES)
+HOLDOUT_MECHANICAL = "results/holdout_mechanical_scores.json"
+HOLDOUT_ARTIFACTS = (HOLDOUT_GOLD, HOLDOUT_GOLD_MANIFEST, HOLDOUT_LOCK, HOLDOUT_RETRIEVAL, HOLDOUT_SCORES,
+                     HOLDOUT_MECHANICAL)
 PENDING = "pending; no adjudicated gold or external holdout model scores"
 
 
@@ -102,9 +104,19 @@ def human_review_status() -> str:
     gold = read_json(HOLDOUT_GOLD_MANIFEST)
     if gold is None or not Path(HOLDOUT_GOLD).is_file():
         return PENDING
-    from .review_resolution import review_design
+    from .review_resolution import SILVER_STATUS, review_design
+    lock = Path(HOLDOUT_LOCK)
+    if gold.get("status") == SILVER_STATUS:
+        silver_text = ("none: no human review; AI silver standard from disclosed AI annotations "
+                       f"{', '.join(gold.get('reader_ids') or [])}")
+        mechanical = read_json(HOLDOUT_MECHANICAL)
+        if (mechanical is None or not lock.is_file()
+                or mechanical.get("gold_sha256") != gold.get("gold_sha256")
+                or mechanical.get("execution_lock_sha256") != sha256(lock.read_bytes()).hexdigest()):
+            return f"{silver_text}; holdout execution not yet complete"
+        return f"{silver_text}; descriptive mechanical holdout scores computed, no clinical claim"
     gold_text = f"gold compiled ({signers(review_design(gold))})"
-    scores, lock = read_json(HOLDOUT_SCORES), Path(HOLDOUT_LOCK)
+    scores = read_json(HOLDOUT_SCORES)
     if scores is None or not lock.is_file():
         return f"{gold_text}; holdout execution or answer review pending"
     if (scores.get("status") != "manual_adjudicated_end_to_end_answer_score_after_gold"

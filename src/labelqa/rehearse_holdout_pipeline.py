@@ -11,7 +11,9 @@ every score it produces is a software check, not an evaluation result.
 ``--design llm_expert`` (the active design) uses one ``llm_`` annotator and one human
 expert: blind receipt, receipt-checked queue, spreadsheet resolution signed by the
 expert, the LLM answer-review converter and a no-op resume of a complete locked run.
-``--design two_reader`` rehearses the earlier two-human consensus path.
+``--design two_reader`` rehearses the earlier two-human consensus path. ``--design
+ai_silver`` (Amendment 6) compiles an AI silver standard from two AI files, refuses an AI
+file posing as a human, and replaces human answer review with mechanical scores.
 """
 
 from __future__ import annotations
@@ -41,7 +43,8 @@ COPIED_FILES = ("results/learned_selector_model.json", "results/learned_selector
 OUTPUT = REPO / "results/holdout_pipeline_rehearsal.json"
 METHODS = ("bm25", "learned_cover", "ontology_cover")
 READER_DESIGNS = {"two_reader": ("rehearsal-reader-a", "rehearsal-reader-b"),
-                  "llm_expert": ("llm_rehearsal_annotator", "rehearsal-expert")}
+                  "llm_expert": ("llm_rehearsal_annotator", "rehearsal-expert"),
+                  "ai_silver": ("llm_rehearsal_annotator", "codex_rehearsal_simulation")}
 READERS = READER_DESIGNS["two_reader"]
 PAXLOVID = "8a99d6d6-fd9e-45bb-b1bf-48c7f761232a"
 GASTROCROM = "00623958-a8fe-47d1-a0d2-0aa4e2f7966e"
@@ -107,7 +110,8 @@ def locate_spans(xml_bytes: bytes, sections: dict[int, str],
     return located
 
 
-def build_inputs(root: Path, readers_ids: tuple[str, str] = READERS) -> dict:
+def build_inputs(root: Path, readers_ids: tuple[str, str] = READERS,
+                 flip_answerability: tuple[str, int] | None = None) -> dict:
     """Write the isolated sources, candidates and two synthetic reader files."""
     pairs = {row["set_id"]: row for source in DEV_SOURCES for row in read_jsonl(source)}
     for relative, set_ids in COHORT_FILES.items():
@@ -163,6 +167,11 @@ def build_inputs(root: Path, readers_ids: tuple[str, str] = READERS) -> dict:
                         "acceptable_evidence_spans_per_claim": spans,
                         "version_change_judgment": ("material" if set_id == PAXLOVID else "stable"),
                     })
+                if position == 1 and flip_answerability == (set_id, number) and claims:
+                    review.update({"answerable_from_version": False, "required_claims": [],
+                                   "acceptable_section_indices_per_claim": [],
+                                   "acceptable_evidence_spans_per_claim": [],
+                                   "independent_answer": "Not stated in this version."})
                 readers[reader].append(review)
     write_jsonl(root / "data/holdout/rehearsal_candidates.jsonl", candidates)
     for reader, rows in readers.items():
@@ -287,83 +296,150 @@ class Runner:
 
 
 def rehearse(root: Path, model: str, design: str = "llm_expert") -> dict:
-    from .answer_review import ANSWER_BLIND_STATUS, FIELDS, LLM_ANSWER_STATUS  # noqa: F401
+    from .answer_review import FIELDS
     from .check_holdout_reviews import LLM_PROVENANCE_STATUS
     readers = READER_DESIGNS[design]
-    expert_design = design == "llm_expert"
-    inputs = build_inputs(root, readers)
+    expert_design, silver_design = design == "llm_expert", design == "ai_silver"
+    # The silver rehearsal makes the second AI file disagree on one item's answerability.
+    inputs = build_inputs(root, readers, (GASTROCROM, 5) if silver_design else None)
     run = Runner(root)
     xml = ("--xml-dir", "results/pinned_xml_holdout_after_gold")
     candidates, reader_a, reader_b = ("data/holdout/rehearsal_candidates.jsonl",
                                       f"data/review/{readers[0]}.jsonl", f"data/review/{readers[1]}.jsonl")
     queue, signed = "data/review/rehearsal_queue.json", "data/review/rehearsal_queue_signed.json"
+    gold_path = "data/holdout/version_silver_ai.jsonl" if silver_design else "data/holdout/version_gold_adjudicated.jsonl"
+    gold_arg = ("--gold", gold_path)
     receipts: tuple[str, ...] = ()
-    if expert_design:
-        provenance = write_llm_provenance(root, reader_a, candidates, "candidates_sha256",
-                                          LLM_PROVENANCE_STATUS, readers[0])
-        human_receipt = f"data/review/{readers[1]}.receipt.json"
-        run.run("expert_blind_receipt", "check_holdout_reviews", "--candidates", candidates,
-                "--reader-a", reader_b, "--receipt", human_receipt, *xml)
-        receipts = ("--human-receipt", human_receipt, "--llm-provenance", provenance)
-        run.run("refuse_llm_queue_without_receipts", "check_holdout_reviews", "--candidates", candidates,
-                "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml,
+    if silver_design:
+        from .compile_silver_standard import CODEX_PROVENANCE_STATUS
+        llm_provenance = write_llm_provenance(root, reader_a, candidates, "candidates_sha256",
+                                              LLM_PROVENANCE_STATUS, readers[0])
+        codex_provenance = f"{reader_b[:-len('.jsonl')]}.provenance.json"
+        (root / codex_provenance).write_text(json.dumps({
+            "status": CODEX_PROVENANCE_STATUS, "reviewer_id": readers[1],
+            "reader_sha256": sha256((root / reader_b).read_bytes()).hexdigest(),
+            "candidates_sha256": sha256((root / candidates).read_bytes()).hexdigest()}, indent=2) + "\n",
+            encoding="utf-8")
+        run.run("refuse_ai_file_as_human_receipt", "check_holdout_reviews", "--candidates", candidates,
+                "--reader-a", reader_b, "--receipt", "data/review/ai_as_human.receipt.json", *xml,
                 expect_failure=True)
-    run.run("check_reader_files", "check_holdout_reviews", "--candidates", candidates,
-            "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml, *receipts)
-    if expert_design:
-        flags = write_audit_flags(root, queue, "data/review/rehearsal_audit_flags.json")
-        run.run("expert_resolution_sheet", "expert_resolution", "sheet", "--queue", queue,
-                "--expert-id", readers[1], "--output-dir", "data/review/resolution", "--audit-flags", flags)
-        fill_resolution_sheet(root / "data/review/resolution/resolution_sheet.csv",
-                              root / "data/review/resolution/filled.csv")
-        run.run("expert_resolution_sign", "expert_resolution", "sign", "--queue", queue,
-                "--expert-id", readers[1], "--sheet", "data/review/resolution/filled.csv",
-                "--audit-flags", flags, "--output", signed)
+        silver_args = ("--candidates", candidates, "--llm-annotation", reader_a, "--llm-provenance", llm_provenance,
+                       "--codex-annotation", reader_b, "--codex-provenance", codex_provenance, *xml,
+                       "--output", gold_path)
+        run.run("compile_silver_standard", "compile_silver_standard", *silver_args)
+        run.run("refuse_silver_overwrite", "compile_silver_standard", *silver_args, expect_failure=True)
     else:
-        sign_gold_queue(root / queue, root / signed)
-    run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,
-            "--reader-b", reader_b, "--adjudicated-queue", signed, *xml, *receipts)
-    run.run("refuse_gold_overwrite", "compile_holdout_gold", "--candidates", candidates,
-            "--reader-a", reader_a, "--reader-b", reader_b, "--adjudicated-queue", signed,
-            *xml, *receipts, expect_failure=True)
-    run.run("refuse_prompts_before_lock", "prepare_holdout_eval", "--method", "bm25",
+        if expert_design:
+            provenance = write_llm_provenance(root, reader_a, candidates, "candidates_sha256",
+                                              LLM_PROVENANCE_STATUS, readers[0])
+            human_receipt = f"data/review/{readers[1]}.receipt.json"
+            run.run("expert_blind_receipt", "check_holdout_reviews", "--candidates", candidates,
+                    "--reader-a", reader_b, "--receipt", human_receipt, *xml)
+            receipts = ("--human-receipt", human_receipt, "--llm-provenance", provenance)
+            run.run("refuse_llm_queue_without_receipts", "check_holdout_reviews", "--candidates", candidates,
+                    "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml,
+                    expect_failure=True)
+        run.run("check_reader_files", "check_holdout_reviews", "--candidates", candidates,
+                "--reader-a", reader_a, "--reader-b", reader_b, "--output", queue, *xml, *receipts)
+        if expert_design:
+            flags = write_audit_flags(root, queue, "data/review/rehearsal_audit_flags.json")
+            run.run("expert_resolution_sheet", "expert_resolution", "sheet", "--queue", queue,
+                    "--expert-id", readers[1], "--output-dir", "data/review/resolution", "--audit-flags", flags)
+            fill_resolution_sheet(root / "data/review/resolution/resolution_sheet.csv",
+                                  root / "data/review/resolution/filled.csv")
+            run.run("expert_resolution_sign", "expert_resolution", "sign", "--queue", queue,
+                    "--expert-id", readers[1], "--sheet", "data/review/resolution/filled.csv",
+                    "--audit-flags", flags, "--output", signed)
+        else:
+            sign_gold_queue(root / queue, root / signed)
+        run.run("compile_gold", "compile_holdout_gold", "--candidates", candidates, "--reader-a", reader_a,
+                "--reader-b", reader_b, "--adjudicated-queue", signed, *xml, *receipts)
+        run.run("refuse_gold_overwrite", "compile_holdout_gold", "--candidates", candidates,
+                "--reader-a", reader_a, "--reader-b", reader_b, "--adjudicated-queue", signed,
+                *xml, *receipts, expect_failure=True)
+    run.run("refuse_prompts_before_lock", "prepare_holdout_eval", *gold_arg, "--method", "bm25",
             "--output", "results/holdout_bm25_prompts.jsonl", expect_failure=True)
-    run.run("execution_lock", "lock_holdout_execution", "--model", model)
+    run.run("execution_lock", "lock_holdout_execution", *gold_arg, "--model", model)
     for method in METHODS:
-        run.run(f"prompts_{method}", "prepare_holdout_eval", "--method", method,
+        run.run(f"prompts_{method}", "prepare_holdout_eval", *gold_arg, "--method", method,
                 "--output", f"results/holdout_{method}_prompts.jsonl")
-    run.run("refuse_out_of_order_call", "run_local", "--input", "results/holdout_learned_cover_prompts.jsonl",
+    run.run("refuse_out_of_order_call", "run_local", *gold_arg, "--input", "results/holdout_learned_cover_prompts.jsonl",
             "--output", "results/holdout_learned_cover_responses.jsonl", "--model", model,
             "--seed", "20261016", expect_failure=True)
     for method in METHODS:
-        run.run(f"answers_{method}", "run_local", "--input", f"results/holdout_{method}_prompts.jsonl",
+        run.run(f"answers_{method}", "run_local", *gold_arg, "--input", f"results/holdout_{method}_prompts.jsonl",
                 "--output", f"results/holdout_{method}_responses.jsonl", "--model", model, "--seed", "20261016")
-    run.run("refuse_repeat_call", "run_local", "--input", "results/holdout_bm25_prompts.jsonl",
+    run.run("refuse_repeat_call", "run_local", *gold_arg, "--input", "results/holdout_bm25_prompts.jsonl",
             "--output", "results/holdout_bm25_responses.jsonl", "--model", model, "--seed", "20261016",
             expect_failure=True)
     before = (root / "results/holdout_bm25_responses.jsonl").read_bytes()
-    resumed = run.run("resume_complete_run_makes_no_call", "run_local", "--input",
+    resumed = run.run("resume_complete_run_makes_no_call", "run_local", *gold_arg, "--input",
                       "results/holdout_bm25_prompts.jsonl", "--output", "results/holdout_bm25_responses.jsonl",
                       "--model", model, "--seed", "20261016", "--resume")
     if (root / "results/holdout_bm25_responses.jsonl").read_bytes() != before or \
             json.loads(resumed.strip().splitlines()[-1])["completed"] != 0:
         raise RuntimeError("Resuming a complete locked run changed its responses")
-    run.run("retrieval_summary", "summarize_holdout_retrieval",
+    run.run("retrieval_summary", "summarize_holdout_retrieval", *gold_arg,
             *[arg for method in METHODS for arg in (f"--{method.replace('_', '-')}",
                                                     f"results/holdout_{method}_prompts.jsonl")],
             "--output", "results/holdout_retrieval_summary.json")
+    answers = mechanical = None
+    if silver_design:
+        run.run("mechanical_answer_summary", "summarize_holdout_mechanical", *gold_arg,
+                "--output", "results/holdout_mechanical_scores.json")
+        mechanical = json.loads((root / "results/holdout_mechanical_scores.json").read_text(encoding="utf-8"))
+    else:
+        answers = rehearse_answer_review(root, run, readers, expert_design, gold_arg, gold_path, FIELDS)
+
+    retrieval = json.loads((root / "results/holdout_retrieval_summary.json").read_text(encoding="utf-8"))
+    responses = {method: list(read_jsonl(root / f"results/holdout_{method}_responses.jsonl")) for method in METHODS}
+    calls = [row for method_rows in responses.values() for row in method_rows if not row.get("error")]
+    seconds = [row["total_duration_ns"] / 1e9 for row in calls if row.get("total_duration_ns")]
+    prompt_tokens = [row["prompt_eval_count"] for row in calls if isinstance(row.get("prompt_eval_count"), int)]
+    report = {
+        "design": design, "reader_ids": list(readers),
+        "gold_review_design": retrieval.get("gold_review_design"),
+        "inputs": inputs, "stages": run.stages,
+        "model_timing": {"calls": len(calls),
+                         "mean_seconds_per_call": round(sum(seconds) / len(seconds), 2) if seconds else None,
+                         "max_seconds_per_call": round(max(seconds), 2) if seconds else None,
+                         "max_prompt_tokens": max(prompt_tokens) if prompt_tokens else None,
+                         "context_window_tight_calls": sum(bool(row.get("context_window_tight")) for row in calls)},
+        "sample_flow": retrieval["sample_flow"],
+        "retrieval_success_counts": {method: sum(item[method] for item in retrieval["per_item"])
+                                     for method in METHODS},
+        "answerable_items": retrieval["answerable_items"],
+        "table_row_gold_items": sum(any(span["source_kind"] == "table_row"
+                                        for claim in row["claims"] for span in claim["acceptable_evidence_spans"])
+                                    for row in read_jsonl(root / gold_path)),
+        "model_errors": {method: sum(bool(row.get("error")) for row in rows) for method, rows in responses.items()},
+    }
+    if answers is not None:
+        report["answer_review_design"] = answers.get("answer_review_design")
+        report["machine_eligible_answers"] = {method: counts["accepted_items"] - counts["invalid_or_unusable_outputs"]
+                                              for method, counts in answers["method_counts"].items()}
+    if mechanical is not None:
+        report["mechanical_success_counts"] = {method: counts["mechanical_success"]
+                                               for method, counts in mechanical["method_counts"].items()}
+    return report
+
+
+def rehearse_answer_review(root: Path, run: "Runner", readers: tuple[str, str], expert_design: bool,
+                           gold_arg: tuple[str, str], gold_path: str, fields: tuple) -> dict:
+    """Method-blind answer review, used only by the designs that have a human reader."""
     packet, key = "review/answer_packet.jsonl", "private/answer_key.json"
-    run.run("blinded_answer_packet", "prepare_blinded_answer_review", "--output", packet, "--private-map", key)
+    run.run("blinded_answer_packet", "prepare_blinded_answer_review", *gold_arg, "--output", packet,
+            "--private-map", key)
     run.run("answer_review_interface_bundle", "export_answer_review_interface", "--packet", packet,
             "--root", ".", "--output", "review/answer-review-data.js")
-    gold = {row["qid"]: row["answerable"] for row in read_jsonl(root / "data/holdout/version_gold_adjudicated.jsonl")}
+    gold = {row["qid"]: row["answerable"] for row in read_jsonl(root / gold_path)}
     rows = list(read_jsonl(root / packet))
     answer_files = [f"review/{reader}_answers.jsonl" for reader in readers]
     answer_receipts: tuple[str, ...] = ()
     if expert_design:
         spec = {"annotator_id": readers[0], "model": "rehearsal fixture, no model call",
                 "disclosures": ["Synthetic rehearsal answer review on development labels."],
-                "items": {row["review_id"]: {field: review[field] for field in FIELDS}
+                "items": {row["review_id"]: {field: review[field] for field in fields}
                           for row in rows for review in [synthetic_answer_review(row, readers[0], gold)]}}
         (root / "review/llm_answer_spec.json").write_text(json.dumps(spec), encoding="utf-8")
         run.run("llm_answer_review_converter", "build_llm_answer_review", "--spec", "review/llm_answer_spec.json",
@@ -392,43 +468,16 @@ def rehearse(root: Path, model: str, design: str = "llm_expert") -> dict:
     run.run("compile_answer_reviews", "answer_review", "compile", *answer_args,
             "--adjudicated-queue", "review/answer_queue_signed.json", "--output", "review/final_answer_reviews.jsonl",
             *answer_receipts)
-    run.run("end_to_end_summary", "summarize_answer_reviews", "--packet", packet, "--private-map", key,
+    run.run("end_to_end_summary", "summarize_answer_reviews", *gold_arg, "--packet", packet, "--private-map", key,
             "--final-reviews", "review/final_answer_reviews.jsonl", "--output", "results/holdout_answer_scores.json")
-
-    retrieval = json.loads((root / "results/holdout_retrieval_summary.json").read_text(encoding="utf-8"))
-    answers = json.loads((root / "results/holdout_answer_scores.json").read_text(encoding="utf-8"))
-    responses = {method: list(read_jsonl(root / f"results/holdout_{method}_responses.jsonl")) for method in METHODS}
-    calls = [row for method_rows in responses.values() for row in method_rows if not row.get("error")]
-    seconds = [row["total_duration_ns"] / 1e9 for row in calls if row.get("total_duration_ns")]
-    prompt_tokens = [row["prompt_eval_count"] for row in calls if isinstance(row.get("prompt_eval_count"), int)]
-    return {
-        "design": design, "reader_ids": list(readers),
-        "gold_review_design": retrieval.get("gold_review_design"),
-        "answer_review_design": answers.get("answer_review_design"),
-        "inputs": inputs, "stages": run.stages,
-        "model_timing": {"calls": len(calls),
-                         "mean_seconds_per_call": round(sum(seconds) / len(seconds), 2) if seconds else None,
-                         "max_seconds_per_call": round(max(seconds), 2) if seconds else None,
-                         "max_prompt_tokens": max(prompt_tokens) if prompt_tokens else None,
-                         "context_window_tight_calls": sum(bool(row.get("context_window_tight")) for row in calls)},
-        "sample_flow": retrieval["sample_flow"],
-        "retrieval_success_counts": {method: sum(item[method] for item in retrieval["per_item"])
-                                     for method in METHODS},
-        "answerable_items": retrieval["answerable_items"],
-        "table_row_gold_items": sum(any(span["source_kind"] == "table_row"
-                                        for claim in row["claims"] for span in claim["acceptable_evidence_spans"])
-                                    for row in read_jsonl(root / "data/holdout/version_gold_adjudicated.jsonl")),
-        "model_errors": {method: sum(bool(row.get("error")) for row in rows) for method, rows in responses.items()},
-        "machine_eligible_answers": {method: counts["accepted_items"] - counts["invalid_or_unusable_outputs"]
-                                     for method, counts in answers["method_counts"].items()},
-    }
+    return json.loads((root / "results/holdout_answer_scores.json").read_text(encoding="utf-8"))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=REPO / "results/holdout_rehearsal")
     parser.add_argument("--model", default="qwen2.5:3b")
-    parser.add_argument("--design", choices=tuple(READER_DESIGNS), default="llm_expert")
+    parser.add_argument("--design", choices=tuple(READER_DESIGNS), default="ai_silver")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
     root = args.root.resolve()

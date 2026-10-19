@@ -86,7 +86,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None,
                         help="Explicit Ollama generation seed; omitted for legacy pilot parity")
     parser.add_argument("--timeout", type=int, default=180)
-    parser.add_argument("--gold", type=Path, default=Path("data/holdout/version_gold_adjudicated.jsonl"))
+    parser.add_argument("--gold", type=Path, default=Path("data/holdout/version_silver_ai.jsonl"))
     parser.add_argument("--execution-lock", type=Path, default=Path("paper/HOLDOUT_EXECUTION_LOCK.json"))
     parser.add_argument("--resume", action="store_true",
                         help="Continue an interrupted locked holdout run without repeating any saved call")
