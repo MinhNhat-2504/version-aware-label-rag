@@ -69,6 +69,10 @@ GROUPS = {
                            "results/version_table_span_aligned_comparison.json",
                            "results/synthetic_claim_judge_pilot.json", "results/spl_table_structure_audit.json"],
     "software_rehearsal": ["results/holdout_pipeline_rehearsal_v6_ai_silver.json"],
+    "holdout/exploratory_generators": ["paper/EXPLORATORY_PLAN_GENERATORS.md", "paper/locks_explore/*.json",
+                                       "results/explore_*_prompts.jsonl", "results/explore_*_prompts.manifest.json",
+                                       "results/explore_*_responses.jsonl", "results/explore_*_responses.sessions.jsonl",
+                                       "results/explore_*_mechanical_scores.json", "results/exploratory_generators.json"],
 }
 
 README = """# Data archive: complete multi-section evidence retrieval from FDA drug labels
@@ -97,6 +101,8 @@ descriptive and carry no clinical claim. Nothing here is medical advice.
 - `holdout/superseded_run1`: the first locked run, superseded before any score was computed; not reported.
 - `benchmark`: preregistration lock, one-shot test report and predictions, selector weights,
   development cross-fit and validation reports with per-question predictions.
+- `holdout/exploratory_generators`: the exploratory plan, its locks, and the Qwen2.5 3B repeat and
+  Qwen2.5 7B runs with mechanical reports (exploratory, written after the reported run).
 - `benchmark/ablations`, `development_pilots`, `software_rehearsal`: exploratory and software-check reports.
 
 ## Licences and sources
