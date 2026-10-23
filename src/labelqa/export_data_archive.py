@@ -73,12 +73,16 @@ GROUPS = {
                                        "results/explore_*_prompts.jsonl", "results/explore_*_prompts.manifest.json",
                                        "results/explore_*_responses.jsonl", "results/explore_*_responses.sessions.jsonl",
                                        "results/explore_*_mechanical_scores.json", "results/exploratory_generators.json"],
+    "benchmark/neural_baselines": ["paper/EXPLORATORY_PLAN_NEURAL_BASELINES.md", "results/neural_baselines.json",
+                                   "results/neural_baselines_predictions.jsonl",
+                                   "results/neural_baselines_diagnostics.json"],
 }
 
 README = """# Data archive: complete multi-section evidence retrieval from FDA drug labels
 
-Companion data for the manuscript "Learning to retrieve complete multi-section evidence from
-FDA drug labels: a preregistered benchmark test and a descriptive temporal holdout".
+Companion data for the manuscript "Retrieving complete multi-section evidence under a fixed
+passage budget: a learned set selector, neural baselines and a preregistered one-shot test"
+(version 2; version 1 accompanied an earlier version of the manuscript).
 
 Code: https://github.com/MinhNhat-2504/version-aware-label-rag (commit {commit}, MIT License).
 Built {built} UTC. Verify with: `sha256sum -c SHA256SUMS.txt`.
@@ -103,6 +107,9 @@ descriptive and carry no clinical claim. Nothing here is medical advice.
   development cross-fit and validation reports with per-question predictions.
 - `holdout/exploratory_generators`: the exploratory plan, its locks, and the Qwen2.5 3B repeat and
   Qwen2.5 7B runs with mechanical reports (exploratory, written after the reported run).
+- `benchmark/neural_baselines`: plan, report, per-question rankings and diagnostics for BGE-M3 dense,
+  BM25+BGE-M3 fusion and BGE cross-encoder reranking on validation and test (exploratory, added
+  after the one-shot test was opened).
 - `benchmark/ablations`, `development_pilots`, `software_rehearsal`: exploratory and software-check reports.
 
 ## Licences and sources
